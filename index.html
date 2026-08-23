@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- CSP: a página renderiza dado vindo de formulário aberto; isto transforma
+       uma regressão de XSS em violação bloqueada. unpkg = Leaflet com SRI;
+       cartocdn/osm = tiles do mapa (imagens). Pages não emite header — meta tag
+       é mitigação parcial documentada (ADR-0004). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com; img-src 'self' data: https://unpkg.com https://*.basemaps.cartocdn.com https://tile.openstreetmap.org; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>movimenta7 — atividade física em comunidade no DF</title>
+  <meta name="description" content="Encontre uma atividade física perto de você no DF: corrida, caminhada, ciclismo, vôlei e mais. Organizado pela comunidade adventista, aberto a todos. Cadastre seu grupo no mapa.">
+  <meta property="og:title" content="movimenta7 — atividade física em comunidade no DF">
+  <meta property="og:description" content="Corrida, caminhada, ciclismo, vôlei e mais, em todo o DF. Cadastre a atividade do seu grupo e apareça no mapa que vai reunir tudo isso.">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="pt_BR">
+  <meta property="og:url" content="https://jorgeyuridj.github.io/movimenta7/">
+  <!-- Capa do link no WhatsApp (URL absoluta: as redes não resolvem caminho relativo) -->
+  <meta property="og:image" content="https://jorgeyuridj.github.io/movimenta7/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="movimenta7 — mapa de atividades físicas da comunidade no DF.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#15803D">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%83%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/tema.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
+  <header class="topo">
+    <div class="topo-inner">
+      <a class="marca" href="#conteudo" aria-label="movimenta7 — início">
+        <span class="marca-pin" aria-hidden="true">🏃</span>
+        <span class="marca-nome">movimenta7</span>
+      </a>
+      <div class="topo-acoes">
+        <button id="botao-tema" class="botao-tema" type="button" aria-label="Mudar tema" aria-pressed="false">
+          <span class="icone-tema" aria-hidden="true">◐</span>
+        </button>
+        <a id="cta-topo" class="botao botao-primario oculto" href="#" target="_blank" rel="noopener">Cadastrar atividade</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="conteudo">
+    <!-- HERO: a headline é o LCP (texto, nunca imagem) -->
+    <section class="hero" aria-labelledby="titulo-hero">
+      <p class="eyebrow">Comunidade adventista do DF · aberto a todos</p>
+      <h1 id="titulo-hero">movimenta7</h1>
+      <p class="hero-sub">
+        Encontre uma atividade física perto de você, participe no seu ritmo e
+        movimente-se em comunidade. <strong>Corrida, caminhada, ciclismo, vôlei e mais,
+        em todo o DF.</strong>
+      </p>
+      <div class="hero-acoes">
+        <a id="cta-hero" class="botao botao-primario oculto" href="#" target="_blank" rel="noopener">Cadastre sua atividade →</a>
+        <p id="aviso-form" class="aviso-form">O link de cadastro entra no ar ainda hoje — volte em instantes.</p>
+        <a id="botao-whatsapp" class="botao botao-secundario oculto" href="#" target="_blank" rel="noopener">Falar no WhatsApp</a>
+        <p id="aviso-whatsapp" class="aviso-whatsapp oculto">O WhatsApp da moderação entra no ar junto com o cadastro.</p>
+      </div>
+    </section>
+
+    <!-- 3 BULLETS DE VALOR -->
+    <section class="valores" aria-label="Por que participar">
+      <div class="valor">
+        <span class="valor-icone" aria-hidden="true">📍</span>
+        <strong>Perto de você</strong>
+        <p>Grupos por região administrativa, num mapa só — ache o mais próximo e apareça.</p>
+      </div>
+      <div class="valor">
+        <span class="valor-icone" aria-hidden="true">🤝</span>
+        <strong>No seu ritmo</strong>
+        <p>Do primeiro passo ao pelotão: iniciantes são bem-vindos e ninguém fica para trás.</p>
+      </div>
+      <div class="valor">
+        <span class="valor-icone" aria-hidden="true">💚</span>
+        <strong>Em comunidade</strong>
+        <p>Organizado por igrejas e grupos locais, gratuito na maioria das atividades e aberto a todos.</p>
+      </div>
+    </section>
+
+    <!-- MAPA -->
+    <section id="secao-mapa" class="secao" aria-labelledby="titulo-mapa">
+      <h2 id="titulo-mapa">O mapa do movimento</h2>
+      <p class="secao-sub">Cada pin é um grupo real, com dia, horário e contato. Toque num pin para conhecer o grupo.</p>
+      <figure class="mapa-figura">
+        <div id="mapa" class="mapa" aria-label="Mapa do Distrito Federal com os grupos de atividade física"></div>
+        <p id="mapa-status" class="mapa-status">Carregando o mapa…</p>
+        <div id="faixa-nascendo" class="faixa-nascendo">🌱 O mapa está nascendo — cadastre seu grupo e seja o primeiro pin da sua região.</div>
+      </figure>
+      <p id="contador" class="contador" aria-live="polite"></p>
+      <p class="fonte-dados">Limites das regiões administrativas: IPEDF / SEDUH-GDF (camada Limite_RA_2019).
+        Só entram no mapa cadastros aprovados pela moderação.</p>
+    </section>
+
+    <!-- COMO FUNCIONA -->
+    <section id="como-funciona" class="secao" aria-labelledby="titulo-como">
+      <h2 id="titulo-como">Como funciona</h2>
+      <ol class="passos">
+        <li><strong>Cadastre a atividade do seu grupo</strong> — leva uns 3 minutos: modalidade, região,
+          dia, horário, local público de encontro e o contato do grupo.</li>
+        <li><strong>A moderação revisa.</strong> Nada entra no site sem revisão humana — e dados
+          pessoais (seu nome e telefone) nunca viram públicos.</li>
+        <li><strong>Seu grupo aparece no mapa</strong> — e quem está por perto encontra vocês.</li>
+      </ol>
+      <p class="aviso-privacidade"><strong>Privacidade (LGPD):</strong> o movimenta7 é uma iniciativa
+        comunitária independente. Coletamos os dados do cadastro só para organizar e divulgar as
+        atividades. Vira público no site apenas: nome do grupo, igreja/organização, modalidade,
+        região, dia, horário, local público e o contato que você indicar como público. Seu nome e
+        telefone pessoais ficam privados com a moderação. Não coletamos dados de menores de idade.
+        Para corrigir ou remover seu cadastro, <a id="link-remocao-wa" href="#" rel="noopener">fale com a
+        moderação pelo WhatsApp</a>. Base legal: consentimento (art. 7º, I da LGPD). Regime de agente
+        de pequeno porte — Res. CD/ANPD nº 2/2022.</p>
+    </section>
+  </main>
+
+  <footer class="rodape">
+    <p><strong>Iniciativa comunitária independente e voluntária</strong>, organizada por membros da
+      comunidade adventista do DF e aberta a toda Brasília. Participação gratuita na maioria das
+      atividades; cada grupo é responsável pela própria organização.</p>
+    <p>Mapa: © OpenStreetMap contributors © CARTO · Limites das RAs: IPEDF / SEDUH-GDF.
+      <a id="link-repo" href="https://github.com/JorgeYuriDj/movimenta7" target="_blank" rel="noopener">Código aberto no GitHub</a>.</p>
+  </footer>
+
+  <!-- CTA fixo na zona do polegar (mobile) — aparece quando o form estiver configurado -->
+  <div id="cta-fixo" class="cta-fixo oculto">
+    <a id="cta-fixo-link" class="botao botao-primario" href="#" target="_blank" rel="noopener">Cadastre sua atividade →</a>
+  </div>
+
+  <noscript>
+    <p class="sem-js">Este site precisa de JavaScript para mostrar o mapa. Os dados públicos ficam
+      no <a href="data/snapshot.json">arquivo aberto de dados</a>.</p>
+  </noscript>
+
+  <script src="js/config.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

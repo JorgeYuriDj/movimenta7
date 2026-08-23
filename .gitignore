@@ -1,0 +1,11 @@
+# Private data must never enter the repo (LGPD + REGRA ZERO)
+*.env
+.env*
+dados-privados/
+*contatos*
+*telefone*
+node_modules/
+.DS_Store
+Thumbs.db
+*.bak
+*.stackdump

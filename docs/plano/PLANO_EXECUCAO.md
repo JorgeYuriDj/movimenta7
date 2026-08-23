@@ -57,7 +57,7 @@ mapa — uma igreja pode ter N atividades) · **Evento pontual** (prova, treinã
 | D7 | Revisor externo | **Codex (plano Pro do dono, GPT-5.3-Codex-Spark)** como revisor adversarial READ-ONLY em marcos, replicando o ciclo do ifp-plataforma: prompt em inglês, parecer em português, reconciliação achado-a-achado com céticos | \_revisao_codex/PROMPT_ANALISE_SISTEMA.md:3-185 do IFP — seção 5 abaixo |
 | D8 | UX | Aplicar a pesquisa do IFP: Core Web Vitals como meta (LCP≤2,5s, INP≤200ms, CLS≤0,1), WCAG 2.2 AA piso, thumb zone (CTA na metade inferior), card-poster como card de atividade ("Corrida no Parque da Cidade — dom 6h30", nunca "Atividade 12"), chips roláveis ≥44px, 1 CTA de destaque/tela, empty states aspiracionais, `100svh` nunca `100vh` (browser interno do WhatsApp), og:image 1200×630, `prefers-reduced-motion` | ESPECIALISTA_FRONTEND_UX.md:15-41,82-118 · PLANO_UX.md:100-108 |
 | D9 | Identidade | Tema claro+escuro (mecanismo do mapa-embaixadores). **Método** de tokens do PLANO_UX (fundo quase-preto quente, acento raro com contraste ≥4,5:1 verificado por fórmula), mas com **acento próprio "verde movimento"** — valores exatos validados na construção com a fórmula de contraste (não chutados) | PLANO_UX.md:7-51 (método) · regra anti-alucinação do dono |
-| D10 | Mapa entra DEPOIS do cadastro | Amanhã lança **sem mapa** (landing + form). O mapa estreia na Fase 1 já com dados reais — mapa vazio no dia 1 passa desconfiança; "já somos X grupos" curado à mão passa confiança | checklists de lançamento (PESQUISAS/2026-08-23_cadastro-24h) + empty-state aspiracional (ESPECIALISTA §9.3) |
+| D10 | **Mapa desde o dia 1** (decisão do dono, 23/08) | O mapa Leaflet vai ao ar JUNTO com a landing, mesmo vazio — o dono avaliou que ver o próprio lugar no mapa gera impacto e busca; ele se preenche conforme os cadastros são aprovados. O vazio vira convite: faixa "O mapa está nascendo — seja o primeiro pin da sua região" + contador de cadastros (empty-state aspiracional, ESPECIALISTA §9.3). A recomendação anterior (mapa só na Fase 1) fica registrada e foi vencida pela decisão do dono | decisão do dono 23/08/2026 · empty-state ESPECIALISTA_FRONTEND_UX.md §9.3 |
 
 ## 3. Arquitetura (fluxo de dados)
 
@@ -88,7 +88,9 @@ Checklist completo com textos prontos em [`LANCAMENTO_DIA1.md`](LANCAMENTO_DIA1.
 1. Criar o Google Form com o script pronto (`scripts/criar_form.gs` — cola no Apps Script, roda 1x,
    o form nasce completo com aviso de privacidade). ~15 min.
 2. Publicar a landing (1 página estática já no padrão visual, com o link do form + botão WhatsApp
-   + aviso de privacidade). Claude constrói e sobe hoje/amanhã cedo no GitHub Pages. ~2 h de build.
+   + aviso de privacidade) **já com o mapa Leaflet do DF** (decisão do dono: mapa desde o dia 1,
+   vazio-convidativo com faixa "seja o primeiro pin da sua região" + contador de cadastros).
+   Claude constrói e sobe hoje/amanhã cedo no GitHub Pages. ~3-4 h de build.
 3. Divulgar nos 3 canais: grupos de WhatsApp (mensagem pronta), Instagram, contato direto com
    líderes de 10 igrejas. Meta da semana: **15 atividades reais cadastradas** (validação humana
    do rascunho vira meta de cadastro).

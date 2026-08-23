@@ -1,7 +1,10 @@
 # Lançamento Fase 0 — AMANHÃ (24/08/2026)
 
-> Objetivo do dia: **divulgar e começar os cadastros.** Sem mapa, sem lista automática.
-> Landing + formulário + WhatsApp + aviso de privacidade. Só isso — e bem feito.
+> Objetivo do dia: **divulgar e começar os cadastros.**
+> Landing **com o mapa do DF já visível** (decisão do dono, 23/08: mapa desde o dia 1, mesmo
+> vazio — ele se preenche conforme os cadastros são aprovados) + formulário + WhatsApp +
+> aviso de privacidade. O vazio é tratado como convite: faixa "O mapa está nascendo — cadastre
+> seu grupo e seja o primeiro pin da sua região" + contador de cadastros recebidos.
 
 ## Passo a passo (na ordem)
 
@@ -54,5 +57,5 @@ Mensagem pronta para grupos de WhatsApp (ajuste o que quiser):
 > (art. 7º, I da LGPD). Regime de agente de pequeno porte — Res. CD/ANPD nº 2/2022.
 
 ## O que fica explicitamente para depois de amanhã
-Mapa Leaflet · lista automática · agenda/.ics · selo de confirmação · provas FAtDF.
-(Ver PLANO_EXECUCAO.md — Fases 1 e 2.)
+Lista automática completa com filtros · agenda/.ics · selo de confirmação · provas FAtDF.
+(Ver PLANO_EXECUCAO.md — Fases 1 e 2. O mapa já entra amanhã, por decisão do dono.)

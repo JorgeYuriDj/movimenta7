@@ -1,6 +1,6 @@
 # ADR-0003 — Leaflet 1.9.4 + tiles CARTO raster + GeoJSON IPEDF
 
-**Status:** proposto (aguarda análise do dono) · 23/08/2026
+**Status:** ACEITO pelo dono em 23/08/2026
 
 **Decisão:**
 - **Leaflet 1.9.4** via unpkg com hash SRI da página oficial (2.0 ainda é alpha — revalidar em

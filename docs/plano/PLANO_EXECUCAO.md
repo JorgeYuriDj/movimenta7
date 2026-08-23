@@ -1,6 +1,6 @@
 # PLANO DE EXECUÇÃO — movimenta7
 
-> **Status: AGUARDANDO ANÁLISE DO DONO** (Jorge Yuri) — nada abaixo vira código antes do seu OK.
+> **Status: APROVADO pelo dono em 23/08/2026** — execução liberada.
 > Escrito em 23/08/2026, com base em: código real do `mapa-embaixadores-2026`, pesquisa de
 > frontend do `ifp-plataforma`, ciclo de revisão Codex do `ifp-plataforma`, base "Engenharia
 > de IA" (citações abaixo) e 2 pesquisas web novas (salvas em `PESQUISAS/`).

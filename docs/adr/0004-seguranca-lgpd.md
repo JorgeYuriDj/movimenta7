@@ -1,6 +1,6 @@
 # ADR-0004 — Segurança e LGPD (minimização, denylist no CI, CSP)
 
-**Status:** proposto (aguarda análise do dono) · 23/08/2026
+**Status:** ACEITO pelo dono em 23/08/2026
 
 **Decisão:**
 1. Todo dado da comunidade entra no DOM via `textContent` — `innerHTML` proibido, inclusive em

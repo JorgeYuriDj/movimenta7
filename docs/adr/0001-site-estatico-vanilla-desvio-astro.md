@@ -1,6 +1,6 @@
 # ADR-0001 — Site estático vanilla JS (desvio do default Astro)
 
-**Status:** proposto (aguarda análise do dono) · 23/08/2026
+**Status:** ACEITO pelo dono em 23/08/2026
 
 **Contexto:** o FRONTEND_BASELINE da base manda Astro para site 100% estático e exige ADR para
 desvio (`FRONTEND_BASELINE.md:20`). O movimenta7 precisa lançar cadastros em 1 dia e herda ~70%

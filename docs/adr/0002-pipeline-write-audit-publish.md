@@ -1,6 +1,6 @@
 # ADR-0002 — Pipeline de dados Write-Audit-Publish (planilha privada → JSON público)
 
-**Status:** proposto (aguarda análise do dono) · 23/08/2026
+**Status:** ACEITO pelo dono em 23/08/2026
 
 **Contexto:** o mapa-embaixadores publica a planilha via CSV público — aceitável lá (dados
 anônimos), inaceitável aqui (cadastro tem nome/telefone do organizador). "Publicar na web"

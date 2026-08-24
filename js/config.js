@@ -13,7 +13,7 @@
    no lugar do botão.
    ============================================================ */
 window.MOV7_CONFIG = {
-  FORM_URL: "",
+  FORM_URL: "https://docs.google.com/forms/d/e/1FAIpQLSfb07atFzG4a_TfTIp8LINg6hNb0A5QtIu06HyRiu6W2KSfZw/viewform",
   WHATSAPP_URL: "",
   REPO_URL: "https://github.com/JorgeYuriDj/movimenta7",
 };

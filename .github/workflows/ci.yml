@@ -41,6 +41,13 @@ jobs:
       - name: Gate anti-innerHTML nos popups (CVE-2025-69993)
         run: node scripts/valida_popup.mjs
 
+      # Enquanto a variavel PLANILHA_CSV_URL nao existir, este passo avisa e
+      # segue: o site continua publicando o que ja esta em moderacao/.
+      - name: Trazer os cadastros aprovados da planilha
+        env:
+          PLANILHA_CSV_URL: ${{ vars.PLANILHA_CSV_URL }}
+        run: node scripts/ingerir_csv.mjs
+
       - name: Reconstruir o snapshot a partir da moderacao
         run: node scripts/publicar_snapshot.mjs
 

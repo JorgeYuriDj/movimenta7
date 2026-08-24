@@ -8,7 +8,13 @@ Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorg
 1. **`textContent` sempre, `innerHTML` nunca** — todo dado da comunidade é hostil até prova
    contrária (SECURITY_BASELINE.md:33). Vale para popups do Leaflet.
 2. **A planilha privada NUNCA entra no repo nem vira pública.** Público só passa pelo pipeline
-   Write-Audit-Publish (ADR-0002). Denylist no CI barra telefone/e-mail pessoal no snapshot.
+   Write-Audit-Publish (ADR-0002). O controle primário é **allowlist** (`CAMPOS_PUBLICOS` em
+   `scripts/denylist.mjs`) — campo fora dela reprova, tenha o nome que tiver; a denylist ficou
+   como 2ª camada. Valores também são checados: telefone, e-mail, CPF/CNPJ (mod-11) e link fora
+   do campo de contato.
+   ⚠️ **Nenhum cadastro é publicado editando `moderacao/aprovados.json` à mão** — repo público
+   tem histórico permanente e isso conflita com o direito de exclusão (ADR-0005, decisão 1).
+   O caminho é a planilha → `scripts/ingerir_csv.mjs`.
 3. **Nenhum dado de menor de idade** (ADR-0004). Aviso de privacidade sempre visível.
 4. Deploy via `git push` (Pages). **Rollback = `git revert HEAD && git push`** — 1 comando.
 5. CI verde obrigatório: testes + gates (exit ≠ 0 = não sobe). ✅ **Lacuna FECHADA em

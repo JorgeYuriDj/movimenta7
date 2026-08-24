@@ -12,7 +12,7 @@ jobs:
         with:
           node-version: "22"
       - name: Testes de unidade
-        run: node --test tests/util.test.mjs
+        run: node --test tests/*.test.mjs
       - name: Gate de contraste (D9)
         run: node scripts/valida_contraste.mjs
       - name: Gate de dados publicos (denylist D5)

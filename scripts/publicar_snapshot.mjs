@@ -1,0 +1,159 @@
+/**
+ * movimenta7 — moderation step of the Write-Audit-Publish pipeline (ADR-0002).
+ *
+ * Reads moderacao/aprovados.json (PUBLIC fields only, curated by the human
+ * moderator) and writes data/snapshot.json, which is what the site reads.
+ *
+ * The private response spreadsheet is NEVER an input here: the moderator
+ * copies only the public fields across by hand. That manual gap IS the
+ * privacy control (ADR-0004) — do not automate it away.
+ *
+ * Coordinates: the form does not ask for them, so a group is placed at the
+ * centroid of its administrative region, taken from the official IPEDF layer
+ * (data/ra_df.geojson). Never hardcode coordinates (ADR-0003). Groups sharing
+ * a region get a small deterministic offset so their pins do not overlap.
+ *
+ * Fail-closed: any private-looking field aborts the write (exit 1).
+ *
+ * Run: node scripts/publicar_snapshot.mjs
+ */
+import { readFileSync, writeFileSync } from "node:fs";
+// Same denylist the CI gate uses — one list, so the two can never disagree.
+import { isPrivateKey, looksLikePhone } from "./denylist.mjs";
+
+const IN = new URL("../moderacao/aprovados.json", import.meta.url);
+const GEO = new URL("../data/ra_df.geojson", import.meta.url);
+const OUT = new URL("../data/snapshot.json", import.meta.url);
+
+const PUBLIC_KEYS = new Set([
+  "grupo", "organizacao", "regiao", "modalidades", "dias",
+  "horario", "local", "contato", "lat", "lon",
+]);
+
+const fail = (msg) => { console.error("PUBLICACAO ABORTADA: " + msg); process.exit(1); };
+
+// ---------- geometry ----------
+
+const ringsOf = (geom) =>
+  geom.type === "Polygon" ? [geom.coordinates[0]]
+    : geom.type === "MultiPolygon" ? geom.coordinates.map((p) => p[0])
+      : [];
+
+function pointInRing(lon, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > lat) !== (yj > lat) &&
+      lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Signed-area centroid; for concave regions it can land outside the polygon,
+// so it is checked and replaced by a grid-scanned interior point when needed.
+function centroidOf(ring) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    const f = xj * yi - xi * yj;
+    a += f; cx += (xj + xi) * f; cy += (yj + yi) * f;
+  }
+  if (a === 0) return null;
+  a *= 0.5;
+  return [cx / (6 * a), cy / (6 * a)];
+}
+
+function interiorPoint(ring) {
+  const c = centroidOf(ring);
+  if (c && pointInRing(c[0], c[1], ring)) return c;
+  const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  for (let i = 1; i < 20; i++) {
+    for (let j = 1; j < 20; j++) {
+      const x = x0 + ((x1 - x0) * i) / 20, y = y0 + ((y1 - y0) * j) / 20;
+      if (pointInRing(x, y, ring)) return [x, y];
+    }
+  }
+  return null;
+}
+
+const norm = (s) => String(s || "").normalize("NFD")
+  .replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+function buildRegionIndex(geo) {
+  const idx = new Map();
+  for (const f of geo.features) {
+    const nome = f.properties?.ra;
+    const ring = ringsOf(f.geometry)[0];
+    if (!nome || !ring) continue;
+    const pt = interiorPoint(ring);
+    if (pt) idx.set(norm(nome), { nome, lon: pt[0], lat: pt[1] });
+  }
+  return idx;
+}
+
+// ---------- main ----------
+
+let aprovados;
+try {
+  aprovados = JSON.parse(readFileSync(IN, "utf8"));
+} catch (e) {
+  fail("moderacao/aprovados.json invalido ou ausente: " + e.message);
+}
+if (!Array.isArray(aprovados)) fail("moderacao/aprovados.json deve ser uma LISTA [ ... ]");
+
+const geo = JSON.parse(readFileSync(GEO, "utf8"));
+const regioes = buildRegionIndex(geo);
+
+const erros = [];
+const semCoordenada = [];
+const usoPorRegiao = new Map();
+const registros = [];
+
+aprovados.forEach((r, i) => {
+  const rotulo = `registro ${i + 1}` + (r?.grupo ? ` ("${r.grupo}")` : "");
+  if (r == null || typeof r !== "object") { erros.push(`${rotulo}: nao e um objeto`); return; }
+
+  for (const [k, v] of Object.entries(r)) {
+    if (isPrivateKey(k)) erros.push(`${rotulo}: campo privado "${k}" — remova antes de publicar`);
+    else if (!PUBLIC_KEYS.has(k)) erros.push(`${rotulo}: campo desconhecido "${k}" — so os campos publicos entram`);
+    if (looksLikePhone(k, v)) erros.push(`${rotulo}: valor com cara de telefone no campo "${k}"`);
+  }
+  if (!r.grupo) { erros.push(`${rotulo}: falta "grupo" (sem nome do grupo o site nao mostra)`); return; }
+  if (!r.regiao) { erros.push(`${rotulo}: falta "regiao"`); return; }
+
+  const rec = {
+    grupo: r.grupo, organizacao: r.organizacao || "", regiao: r.regiao,
+    modalidades: Array.isArray(r.modalidades) ? r.modalidades : [],
+    dias: Array.isArray(r.dias) ? r.dias : [],
+    horario: r.horario || "", local: r.local || "", contato: r.contato || "",
+  };
+
+  if (Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))) {
+    rec.lat = Number(r.lat); rec.lon = Number(r.lon);
+  } else {
+    const ra = regioes.get(norm(r.regiao));
+    if (!ra) {
+      semCoordenada.push(`${rotulo}: regiao "${r.regiao}" nao existe na camada oficial — entra na contagem, mas SEM pin`);
+    } else {
+      // deterministic fan-out (~250 m steps) so pins in the same region stay legible
+      const n = usoPorRegiao.get(ra.nome) || 0;
+      usoPorRegiao.set(ra.nome, n + 1);
+      const ang = n * 2.39996, raio = n === 0 ? 0 : 0.0022 * Math.sqrt(n);
+      rec.lat = +(ra.lat + raio * Math.sin(ang)).toFixed(6);
+      rec.lon = +(ra.lon + raio * Math.cos(ang)).toFixed(6);
+    }
+  }
+  registros.push(rec);
+});
+
+if (erros.length) fail("\n- " + erros.join("\n- "));
+
+const doc = { atualizado_em: new Date().toISOString().slice(0, 10), registros };
+writeFileSync(OUT, JSON.stringify(doc, null, 2) + "\n", { encoding: "utf-8" });
+
+semCoordenada.forEach((a) => console.warn("AVISO: " + a));
+const comPin = registros.filter((r) => r.lat != null).length;
+console.log(`data/snapshot.json publicado: ${registros.length} registro(s), ${comPin} com pin no mapa.`);
+console.log("Confira com: node scripts/valida_snapshot.mjs");

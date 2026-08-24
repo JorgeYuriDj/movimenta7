@@ -6,11 +6,9 @@
  * Run: node scripts/valida_snapshot.mjs
  */
 import { readFileSync } from "node:fs";
+import { isPrivateKey, looksLikePhone } from "./denylist.mjs";
 
 const PATH = new URL("../data/snapshot.json", import.meta.url);
-const FORBIDDEN_KEYS = /(telefone|celular|whatsapp_pessoal|e?-?mail|nome_pessoal|responsavel|cpf|rg|nascimento|endereco_res)/i;
-// 61 99999-0000 · (61)99999-0000 · +55 61 9 9999 0000 …
-const PHONE_LIKE = /(\+?55[\s.-]?)?\(?\d{2}\)?[\s.-]?9?\s?\d{4}[\s.-]?\d{4}/;
 
 let doc;
 try {
@@ -26,11 +24,10 @@ const erros = [];
 registros.forEach((r, i) => {
   if (r == null || typeof r !== "object") return;
   for (const [k, v] of Object.entries(r)) {
-    if (FORBIDDEN_KEYS.test(k)) {
+    if (isPrivateKey(k)) {
       erros.push(`registro ${i}: chave proibida "${k}" (dado privado no snapshot publico)`);
     }
-    // "contato" is the one field the organizer explicitly marked as public
-    if (k !== "contato" && typeof v === "string" && PHONE_LIKE.test(v)) {
+    if (looksLikePhone(k, v)) {
       erros.push(`registro ${i}: valor com cara de telefone no campo "${k}"`);
     }
   }

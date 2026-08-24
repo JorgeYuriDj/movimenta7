@@ -1,7 +1,29 @@
-name: ci
+# movimenta7 — quality gate + publication, in this order and no other.
+#
+# WHY THE DEPLOY JOB LIVES HERE: with Pages in "deploy from a branch" mode the
+# push published the site whether this gate passed or failed — the CI was
+# decorative and CLAUDE.md's "exit != 0 = nao sobe" was simply not true. The
+# deploy job below declares `needs: qa`, so a red gate skips the deploy and the
+# previously published site stays up, untouched.
+#
+# The snapshot is REBUILT in the runner from moderacao/aprovados.json, so what
+# ships is always what the moderation step produces — never a stale committed
+# file edited by hand.
+name: ci e publicacao
+
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# Least privilege by default; the deploy job widens it for itself only.
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false # never abort a publish half-way
 
 jobs:
   qa:
@@ -15,5 +37,47 @@ jobs:
         run: node --test tests/*.test.mjs
       - name: Gate de contraste (D9)
         run: node scripts/valida_contraste.mjs
-      - name: Gate de dados publicos (denylist D5)
+
+      - name: Gate anti-innerHTML nos popups (CVE-2025-69993)
+        run: node scripts/valida_popup.mjs
+
+      - name: Reconstruir o snapshot a partir da moderacao
+        run: node scripts/publicar_snapshot.mjs
+
+      - name: Gate de dados publicos (allowlist D5/ADR-0004)
         run: node scripts/valida_snapshot.mjs
+
+      # Only the files the page actually loads. The branch-mode build served the
+      # whole repository, so scripts/, tests/, docs/ and moderacao/ were all
+      # reachable over HTTP. Nothing secret lives there — the repo is public —
+      # but the site has no reason to serve its own moderation queue, and a
+      # narrow bundle means a file added to the repo tomorrow is not published
+      # by default.
+      - name: Montar o site (so o que a pagina carrega)
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p _site
+          cp index.html .nojekyll _site/
+          cp -r css js data assets _site/
+          echo "--- publicado:" && find _site -type f | sort
+
+      - name: Empacotar o site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+          retention-days: 1 # public repo: build artifacts are world-readable
+
+  deploy:
+    needs: qa # <- the whole point of this file: red gate = no publication
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

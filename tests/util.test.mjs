@@ -60,3 +60,19 @@ test("parseSnapshot never exposes unknown keys (private data cannot leak through
   assert.equal("telefone" in r, false);
   assert.equal("nome" in r, false);
 });
+
+test("cleanField strips invisible characters (Trojan Source, zero-width)", () => {
+  // U+202E flips rendering order: a moderator approves one string and the
+  // popup shows another. U+200B splits a word so no filter downstream matches.
+  assert.equal(cleanField("Cami‮nhada"), "Caminhada");
+  assert.equal(cleanField("Cami​nhada"), "Caminhada");
+  assert.equal(cleanField("﻿Grupo⁦ da Paz⁩"), "Grupo da Paz");
+  assert.equal(cleanField("Caminhada matinal"), "Caminhada matinal", "texto normal intacto");
+});
+
+test("cleanField strips invisibles BEFORE the cut, not after", () => {
+  // Otherwise 120 invisible characters would spend the whole budget and the
+  // visible name would be truncated to nothing.
+  const entrada = "​".repeat(MAX_FIELD) + "Grupo de Caminhada";
+  assert.equal(cleanField(entrada), "Grupo de Caminhada");
+});

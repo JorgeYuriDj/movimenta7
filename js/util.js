@@ -16,9 +16,21 @@ export function safeUrl(u) {
   return "";
 }
 
+/* Invisible characters that change how text READS without changing what it
+   says: bidi overrides (Trojan Source, CVE-2021-42574) can make a popup render
+   a different string than the one the moderator approved, and zero-width
+   characters split a word so that no filter downstream ever matches it.
+   Stripped BEFORE the cut, so they cannot spend the 120-char budget either. */
+const INVISIVEIS = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
+
 export function cleanField(v) {
   if (v == null) return "";
-  return String(v).replace(/\s+/g, " ").trim().slice(0, MAX_FIELD);
+  return String(v)
+    .normalize("NFC")        // one canonical form, so equal strings compare equal
+    .replace(INVISIVEIS, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_FIELD);
 }
 
 // Rough DF bounding box (sanity check only; real bounds come from the RA GeoJSON).
@@ -32,6 +44,12 @@ function insideDF(lat, lon) {
    Unknown/private keys are simply never read — they cannot reach the DOM. */
 export function parseSnapshot(j) {
   const list = Array.isArray(j) ? j : (j && Array.isArray(j.registros) ? j.registros : []);
+  // The cap below is a real ceiling, not a formality: past it the page would
+  // show fewer groups than the counter announces. Saying so out loud is the
+  // difference between a known limit and a number nobody can explain.
+  if (list.length > MAX_RECORDS && typeof console !== "undefined") {
+    console.warn(`movimenta7: o snapshot tem ${list.length} registros e o mapa desenha ${MAX_RECORDS}.`);
+  }
   const out = [];
   for (const r of list.slice(0, MAX_RECORDS)) {
     if (r == null || typeof r !== "object") continue;

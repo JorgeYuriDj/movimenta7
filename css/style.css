@@ -215,7 +215,16 @@ h2 {
 .leaflet-popup-content-wrapper, .leaflet-popup-tip {
   background: var(--surface); color: var(--text);
 }
-.popup-grupo { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+/* min-width:0 + overflow-wrap: a group name is up to 120 chars chosen by
+   whoever filled the form. A single unbroken 60-letter token has no space to
+   wrap at and would stretch the balloon past the screen on a phone, pushing the
+   contact link out of reach. Flex children do not shrink below their content
+   without min-width:0, so both declarations are needed. */
+.popup-grupo {
+  display: flex; flex-direction: column; gap: 4px; font-size: 14px;
+  min-width: 0; max-width: 260px; overflow-wrap: anywhere; word-break: break-word;
+}
+.popup-grupo > * { min-width: 0; }
 .popup-grupo a { color: var(--brand); font-weight: 600; }
 
 /* ---------- como funciona ---------- */

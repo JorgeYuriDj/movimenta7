@@ -19,17 +19,17 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 // Same denylist the CI gate uses — one list, so the two can never disagree.
-import { isPrivateKey, looksLikePhone } from "./denylist.mjs";
+import { CAMPOS_PUBLICOS, CHECAGENS_DE_VALOR, isPrivateKey } from "./denylist.mjs";
 
 const IN = new URL("../moderacao/aprovados.json", import.meta.url);
 const GEO = new URL("../data/ra_df.geojson", import.meta.url);
 const REG = new URL("../data/regioes.json", import.meta.url);
 const OUT = new URL("../data/snapshot.json", import.meta.url);
 
-const PUBLIC_KEYS = new Set([
-  "grupo", "organizacao", "regiao", "modalidades", "dias",
-  "horario", "local", "contato", "lat", "lon",
-]);
+// Same allowlist the CI gate uses. It used to be a private copy of this list
+// living only here, which meant the two could drift apart without a test
+// noticing — and the gate was the one that had drifted.
+const PUBLIC_KEYS = CAMPOS_PUBLICOS;
 
 const fail = (msg) => { console.error("PUBLICACAO ABORTADA: " + msg); process.exit(1); };
 
@@ -129,7 +129,11 @@ aprovados.forEach((r, i) => {
   for (const [k, v] of Object.entries(r)) {
     if (isPrivateKey(k)) erros.push(`${rotulo}: campo privado "${k}" — remova antes de publicar`);
     else if (!PUBLIC_KEYS.has(k)) erros.push(`${rotulo}: campo desconhecido "${k}" — so os campos publicos entram`);
-    if (looksLikePhone(k, v)) erros.push(`${rotulo}: valor com cara de telefone no campo "${k}"`);
+    for (const valor of Array.isArray(v) ? v : [v]) {
+      for (const { teste, motivo } of CHECAGENS_DE_VALOR) {
+        if (teste(k, valor)) erros.push(`${rotulo}: ${motivo} no campo "${k}"`);
+      }
+    }
   }
   if (!r.grupo) { erros.push(`${rotulo}: falta "grupo" (sem nome do grupo o site nao mostra)`); return; }
   if (!r.regiao) { erros.push(`${rotulo}: falta "regiao"`); return; }

@@ -206,7 +206,10 @@ function popupFor(rec) {
     const a = document.createElement("a");
     a.href = rec.contatoUrl;
     a.target = "_blank";
-    a.rel = "noopener";
+    // noopener: the destination cannot reach back into this tab.
+    // noreferrer: it does not learn which page sent the visitor.
+    // nofollow: a link submitted by the community never lends us our ranking.
+    a.rel = "noopener noreferrer nofollow";
     a.textContent = "Contato do grupo →";
     box.appendChild(a);
   } else if (rec.contatoTexto) {

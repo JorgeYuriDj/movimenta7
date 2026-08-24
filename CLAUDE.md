@@ -11,9 +11,12 @@ Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorg
    Write-Audit-Publish (ADR-0002). Denylist no CI barra telefone/e-mail pessoal no snapshot.
 3. **Nenhum dado de menor de idade** (ADR-0004). Aviso de privacidade sempre visível.
 4. Deploy via `git push` (Pages). **Rollback = `git revert HEAD && git push`** — 1 comando.
-5. CI verde obrigatório: testes do parser + gate do snapshot (exit ≠ 0 = não sobe).
-   ⚠️ **LACUNA ABERTA (24/08/2026):** o Pages está em modo `legacy` — o push publica mesmo com
-   o CI vermelho. O "não sobe" ainda NÃO é verdade. Corrigir migrando para `actions/deploy-pages`.
+5. CI verde obrigatório: testes + gates (exit ≠ 0 = não sobe). ✅ **Lacuna FECHADA em
+   24/08/2026:** o Pages saiu do modo `legacy` e passou a publicar por `actions/deploy-pages`,
+   com o job `deploy` declarando `needs: qa`. Verificado de verdade na branch `prova/gate-vermelho`
+   (run 32766185945): gate vermelho → `deploy` **skipped**, site anterior intacto no ar.
+   O que sobe é só o que a página carrega (`index.html`, `css/`, `js/`, `data/`, `assets/`) —
+   `scripts/`, `tests/`, `docs/` e `moderacao/` deixaram de ser servidos.
 6. Idiomas: **código e prompts em inglês; tudo que o dono lê em português.** Pesquisa web em
    inglês, saída em português.
 7. Números públicos sempre REAIS — nunca inflar (regra do dono).

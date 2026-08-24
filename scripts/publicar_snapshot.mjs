@@ -23,6 +23,7 @@ import { isPrivateKey, looksLikePhone } from "./denylist.mjs";
 
 const IN = new URL("../moderacao/aprovados.json", import.meta.url);
 const GEO = new URL("../data/ra_df.geojson", import.meta.url);
+const REG = new URL("../data/regioes.json", import.meta.url);
 const OUT = new URL("../data/snapshot.json", import.meta.url);
 
 const PUBLIC_KEYS = new Set([
@@ -106,6 +107,16 @@ if (!Array.isArray(aprovados)) fail("moderacao/aprovados.json deve ser uma LISTA
 const geo = JSON.parse(readFileSync(GEO, "utf8"));
 const regioes = buildRegionIndex(geo);
 
+// data/regioes.json is the single source of truth linking a form option to a
+// polygon. The two name sets do NOT match by luck: the official layer carries
+// "Sol Nascente/  Pôr do Sol" (double space) and "Sudoeste/ Octogonal", and it
+// predates the Arapoanga / Água Quente splits. Without this map those groups
+// were counted and then silently vanished from the map.
+const mapaRegioes = new Map();
+for (const r of JSON.parse(readFileSync(REG, "utf8")).regioes || []) {
+  mapaRegioes.set(norm(r.rotulo), r);
+}
+
 const erros = [];
 const semCoordenada = [];
 const usoPorRegiao = new Map();
@@ -133,9 +144,22 @@ aprovados.forEach((r, i) => {
   if (Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))) {
     rec.lat = Number(r.lat); rec.lon = Number(r.lon);
   } else {
-    const ra = regioes.get(norm(r.regiao));
+    // Fail loudly. A region we cannot place used to pass with a console.warn
+    // nobody reads, so the group was counted and never drawn.
+    const decl = mapaRegioes.get(norm(r.regiao));
+    if (!decl) {
+      erros.push(`${rotulo}: regiao "${r.regiao}" nao esta declarada em data/regioes.json — ` +
+        `corrija o nome ou acrescente a regiao la (com a feicao correspondente, ou "sem_pin": true)`);
+      return;
+    }
+    const ra = decl.feicao ? regioes.get(norm(decl.feicao)) : null;
+    if (!ra && !decl.sem_pin) {
+      erros.push(`${rotulo}: regiao "${r.regiao}" aponta para a feicao "${decl.feicao}", ` +
+        `que nao existe em data/ra_df.geojson — data/regioes.json esta fora de sincronia`);
+      return;
+    }
     if (!ra) {
-      semCoordenada.push(`${rotulo}: regiao "${r.regiao}" nao existe na camada oficial — entra na contagem, mas SEM pin`);
+      semCoordenada.push(`${rotulo}: "${r.regiao}" e declarada SEM pin de proposito — conta no total, fica fora do mapa`);
     } else {
       // deterministic fan-out (~250 m steps) so pins in the same region stay legible
       const n = usoPorRegiao.get(ra.nome) || 0;

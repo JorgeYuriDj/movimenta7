@@ -1,0 +1,295 @@
+{
+  "summary": "Pesquisa e projeta uma moderacao automatizada e segura para o movimenta7 (Forms -> site estatico publico)",
+  "agentCount": 9,
+  "logs": [
+    "[stall] agent \"pesquisa:publish-pipeline\" stalled (no progress) after 37471s — retrying (1/5)",
+    "[stall] agent \"pesquisa:lgpd-legal\" stalled (no progress) after 37535s — retrying (1/5)",
+    "pesquisa concluida: 4/4 frentes"
+  ],
+  "result": {
+    "veredito": "Sobrevive — mas não como está escrito. A espinha de segurança está certa e eu não consegui derrubá-la: pull sem segredo de longa duração nas duas pontas, allowlist de campos em vez de denylist, deploy com needs:qa (o furo real de hoje — conferi: .github/workflows/ci.yml não tem job de deploy, então o Pages sobe por branch e o CI é decorativo), e tirar do git os dois arquivos ainda vazios (confirmei: data/snapshot.json tem \"registros\": [] e moderacao/aprovados.json é [], ambos rastreados — a janela é real e fecha no primeiro cadastro publicado).\n\nO que os três críticos derrubaram, e com razão, é a camada operacional e duas premissas de isolamento. Aceito 5 correções estruturais deles. Rejeito 3 exageros (abaixo). E acrescento um achado que NENHUM dos três viu e que é o mais urgente de todos, porque é bug VIVO no código de hoje.\n\nO achado novo: das 36 regiões do formulário (scripts/criar_form.gs:24-30), 6 NÃO casam com a camada oficial (data/ra_df.geojson tem 33 feições). Três delas falham por pura diferença de formatação de string — 'SCIA/Estrutural' (camada: 'SCIA'), 'Sol Nascente/Pôr do Sol' (camada: 'Sol Nascente/  Pôr do Sol', com espaço duplo) e 'Sudoeste/Octogonal' (camada: 'Sudoeste/ Octogonal'). O norm() de publicar_snapshot.mjs:81-82 tira acento e faz trim, mas NÃO colapsa espaço interno nem normaliza pontuação. Consequência hoje, no lançamento: um grupo de Sol Nascente/Pôr do Sol — uma das maiores populações do DF — se cadastra, é aprovado, entra no contador e NUNCA aparece no mapa. O único sinal é um console.warn que o dono não vê. Some-se que o desenho proposto queria gerar o enum de região a partir do GeoJSON, o que transformaria esses 6 casos em build vermelho travando tudo (é o 'poison pill' do crítico 2, só que pior e já presente).\n\nOnde os críticos exageraram, e eu não aceito:\n1. O crítico 2 dá crédito ao desenho dizendo que a checagem de conjunto de cabeçalhos 'pega até a pegadinha clássica do QUERY'. Está errado, e o crítico 1 provou: os rótulos da aba PUBLICAR são literais presos ao SLOT, não à coluna de origem — eles não se movem quando a origem desloca. Os dois críticos se contradizem nesse ponto exato e quem está certo é o 1. É por isso que o export vira INDEX/MATCH por string de cabeçalho.\n2. Lista de palavrões pt-BR (crítico 2) — recusada. Controle fraco (contorna-se trocando uma letra), manutenção eterna, falso positivo garantido em nome de igreja. O relance humano de 30 segundos na coluna de nomes resolve isso de verdade; a lista só daria falsa sensação de cobertura.\n3. '5.000 respostas em uma hora' (crítico 2) — número inflado; o endpoint do Forms tem proteção própria do Google e não é roteirizável nesse volume trivialmente. O disjuntor é barato e entra assim mesmo, mas não organizo a arquitetura em torno disso. O próprio crítico concede que a publicação continua fechada — o dano é fila poluída, não vazamento.\n4. Coluna de checksum (crítico 1) — vira opcional, não obrigatória: uma vez que o export resolve por string de cabeçalho, o deslocamento já não acontece. Fica como reforço barato, não como trava.\n\nCrédito onde é devido: o desenho já estava certo ao afirmar que publicar_snapshot.mjs reconstrói campo a campo — confirmei, PUBLIC_KEYS existe em scripts/publicar_snapshot.mjs:28-31 e recusa campo desconhecido. O buraco é que o GATE de CI (valida_snapshot.mjs) não tem essa allowlist, só a denylist. O desenho identificou isso corretamente.",
+    "arquitetura_final": "PRINCÍPIO: o dado pessoal nunca entra no git, nunca entra no documento publicado e nunca depende de um gatilho vivo para ser contido. O julgamento humano é concentrado onde o atacante tem escolha (nome livre, contato, combinação inédita), não onde o cadastro é enumerável (igreja, região, dia, horário).\n\n=== CAMADA 0 — FONTE ÚNICA DE REGIÃO (corrige bug vivo) ===\nNovo arquivo data/regioes.json, ÚNICA fonte de verdade, com uma entrada por opção do formulário:\n  { \"rotulo\": \"Sol Nascente/Pôr do Sol\", \"feicao\": \"Sol Nascente/  Pôr do Sol\", \"sem_pin\": false }\n- \"rotulo\" = texto exato do dropdown; \"feicao\" = valor de properties.ra na camada IPEDF, ou null.\n- Casos explícitos: SCIA/Estrutural→\"SCIA\"; Sol Nascente/Pôr do Sol→\"Sol Nascente/  Pôr do Sol\"; Sudoeste/Octogonal→\"Sudoeste/ Octogonal\"; Arapoanga→\"Planaltina\" (desmembramento; pin no centróide da RA-mãe); Água Quente→\"Recanto das Emas\" (idem); Entorno (fora do DF)→null com sem_pin:true.\n- scripts/criar_form.gs passa a GERAR o dropdown a partir desse arquivo. publicar_snapshot.mjs resolve região por esse mapa. O enum do schema sai desse arquivo. As três pontas não podem mais divergir.\n- Corrigir norm() em publicar_snapshot.mjs para colapsar espaço interno (.replace(/\\s+/g,\" \")) e normalizar pontuação antes de comparar.\n- sem_pin:true é resultado ESPERADO (conta no contador, sem pin), nunca erro de build.\n- tests/regioes.test.mjs: falha se algum \"feicao\" não-nulo não existir em ra_df.geojson. Isso trava a regressão para sempre.\n\n=== CAMADA 1 — FORMULÁRIO (reduz texto livre, mas NÃO é considerado defesa) ===\nReescrever scripts/criar_form.gs:\n- Igreja/organização: addListItem a partir da semente curada + opção \"Outra (vou digitar)\". O item de texto do \"Outra\" recebe O MESMO setValidation dos demais (o desenho original esqueceu isso) e a linha que o usa fica sempre VERMELHA.\n- Horário: addListItem de 15 em 15 min (04h00–22h00).\n- Nome do grupo: requireTextMatchesPattern com classe letras/acentos/espaço/&/-/., ≤60, sem \\d{4,}.\n- Local: mesma classe, ≤80, sem \\d{4,}.\n- Contato PÚBLICO: padrão ancorado único (ver Camada 3).\n- CREF: número em padrão ^\\d{4,6}-?[GP]/DF$; nome do profissional continua coletado e NUNCA sai da planilha.\n- Consentimento vira DOIS itens versionados (consentimento_v1): publicação dos dados do GRUPO; e declaração de que não há dado de menor nem nome de terceiro sem acordo. Se o contato for link de grupo do WhatsApp, um terceiro item de consentimento específico (Camada 6).\n- Dois campos privados (\"Seu nome\", \"Seu WhatsApp\") continuam existindo — são o que permite o cruzamento antifraude da Camada 5.\nREGRA DE OURO: validação de formulário é apagável com um clique na GUI pelo próprio dono e nada downstream percebe. Portanto ela é ERGONOMIA, não controle. Toda regra aqui é REAPLICADA no ingest e no schema.\n\n=== CAMADA 2 — TRIAGEM SEM GATILHO (ARRAYFORMULA) ===\nNada de onFormSubmit. Todas as regras são determinísticas sobre texto e viram ARRAYFORMULA ancorada no cabeçalho, com MATCH/REGEXMATCH/COUNTIFS. Fórmula não tem autorização para expirar, não tem quota, não tem disparo duplo (Issue 144110219), não precisa de LockService nem de idempotência — a classe inteira de falha some.\nColunas calculadas na planilha privada: TRIAGEM, MOTIVO (português), e a coluna manual APROVADO (caixa de seleção) + REMOVER.\nRegras VERMELHAS: \"Famílias com crianças\" marcado; igreja fora do catálogo; local fora do catálogo; local com cara de endereço (rua|av|quadra|conj|casa|lote|CEP|QNM|QNL|QI|SHIS...); atividade orientada sem CREF bem formado; uso de \"Outra (vou digitar)\"; combinação (organizacao+local+dia) inédita; contato novo ou ALTERADO; nome do grupo inédito para aquela igreja; token do nome privado do cadastrante aparecendo em grupo/organizacao/local; honorífico (pastor|pr\\.|pra\\.|irmão|irmã|prof|dr|dra|presb|ancião) em grupo ou local; homóglifo/script misto; velocidade (>N por hora).\nTRÊS INVARIANTES DE INTERFACE, todas obrigatórias:\n- Formatação condicional: TRIAGEM VAZIA pinta VERMELHO com o texto \"NÃO TRIADO\".\n- A visualização \"Pendentes\" filtra TRIAGEM<>\"VERDE\" (nunca =\"VERMELHA\"), para que o estado desconhecido caia automaticamente na pilha que o dono lê.\n- ingerir_csv.mjs ABORTA se qualquer linha com APROVADO=TRUE tiver TRIAGEM vazia. Linha não triada nunca é publicável.\n\n=== CAMADA 3 — CATÁLOGO QUE APRENDE, DENTRO DA PLANILHA ===\nOs catálogos NUNCA moram em data/*.json no repositório público (senão o dono, no celular, recommita para sempre no histórico imutável o endereço residencial que a validação de 4+ dígitos deixa passar).\n- Abas CATALOGO_LOCAIS e CATALOGO_ORGANIZACOES na planilha privada, protegidas contra edição acidental, semeadas uma vez (~60 pontos públicos do DF, igrejas levantadas). O dono pode DIGITAR uma linha nova — planilha ele sabe usar.\n- O aprendizado NÃO precisa de caixinha nem de script: a regra \"local conhecido\" tem duas pernas — (a) está no CATALOGO, OU (b) COUNTIFS(coluna_local; local_desta_linha; coluna_aprovado; TRUE) > 0, isto é, ele já aprovou esse local alguma vez. Aprovar o Parque da Cidade uma vez faz todo cadastro seguinte naquele parque nascer verde. Sem PAT, sem escrita no GitHub, sem editar JSON. Idem para organizações.\n- A perna (b) NÃO se aplica a strings que a triagem marcou como cara-de-endereço: uma linha por endereço pode ser aprovável caso a caso, mas nunca catalogável.\n- No repo fica só uma SEMENTE de exportação inicial, alterada apenas por commit revisado.\n\n=== CAMADA 4 — TRANSPORTE: DOIS ARQUIVOS, RESOLUÇÃO POR CABEÇALHO ===\nEsta é a correção estrutural mais importante. Duas mudanças combinadas:\n(a) Na planilha PRIVADA, a aba PUBLICAR é montada por FÓRMULA que resolve coluna por STRING de cabeçalho, nunca por letra:\n    =INDEX(Respostas!$A:$ZZ; 0; MATCH(\"Nome do grupo\"; Respostas!$A$1:$ZZ$1; 0))\n    montadas dentro de um FILTER({col1\\col2\\...}; aprovado=TRUE; remover=FALSE).\n    Por que: FILTER(A:M) e IMPORTRANGE por letra são posicionais; inserir uma coluna desloca tudo e os RÓTULOS não acompanham — a checagem de conjunto de cabeçalhos passa e entrega o dado da coluna vizinha. INDEX/MATCH absorve o deslocamento sozinho.\n    Fail-closed: se qualquer cabeçalho esperado não existir, IFERROR escreve ZERO linhas e acende uma célula ERRO_CABECALHO. Publicação vazia, nunca publicação deslocada.\n(b) Um SEGUNDO arquivo, \"movimenta7 — público\", puxa só a aba PUBLICAR por IMPORTRANGE. É ESSE arquivo, e só ele, que vai em Arquivo > Compartilhar > Publicar na web (CSV).\n    Por que: o dropdown \"Documento inteiro\" é o padrão daquela tela, e um misclique (ou um republish meses depois) serviria TODAS as abas, incluindo nome e WhatsApp pessoais, numa URL pública sem login — exposição que acontece dentro do Google, ANTES de qualquer gate do repositório rodar. Com o isolamento por arquivo, as colunas privadas não existem no documento publicado: o pior caso vira publicar dado que já era público.\nSELO DE ATUALIDADE (a URL publicada é servida de cache, ~5 min): uma célula versao_publicacao (timestamp+sequencial) é incrementada a cada edição de APROVADO/REMOVER, aparece para o dono e viaja como coluna do CSV. scripts/ingerir_csv.mjs busca com cache-busting (&_=<agora>), compara com a versão esperada e, se vier antiga, tenta de novo por até N vezes; esgotado, ABORTA em português (\"a planilha ainda não atualizou — espere 5 minutos e toque em Publicar de novo\"). Sem esse selo nenhum gate distingue CSV atual de CSV de 10 minutos atrás, e a remoção do art. 18 falha em SILÊNCIO com check verde.\nPARSER: ingerir_csv.mjs usa parser RFC4180 de verdade (aspas, vírgula e quebra de linha embutidas). Um split(\",\") ingênuo permitiria forjar, pelo texto de um campo, uma linha inteira com APROVADO=TRUE que nunca existiu na planilha.\nHIGIENE DE LOG: o repositório é PÚBLICO, logo os logs do Actions são mundialmente legíveis com 90 dias de retenção. Mensagens de aborto imprimem SOMENTE nome de coluna e índice de linha — jamais o valor da célula. retention-days: 1 no artefato do Pages.\n\n=== CAMADA 5 — GATES: ALLOWLIST, E FALHA CLASSIFICADA ===\n- scripts/denylist.mjs vira scripts/campos_publicos.mjs exportando CAMPOS_PUBLICOS (grupo, organizacao, regiao, modalidades, dias, horario, local, contato, orientacao_profissional, custo, publico, lat, lon).\n- valida_snapshot.mjs deixa de só procurar chave ruim: passa a exigir que Object.keys(registro) seja SUBCONJUNTO da allowlist. Chave desconhecida reprova. (publicar_snapshot.mjs:120 já faz isso; o gate de CI não fazia.)\n- Some o carve-out key !== \"contato\" de looksLikePhone (denylist.mjs:42) — com padrão ancorado de contato ele não tem mais razão de existir e hoje deixa telefone passar livre no campo contato.\n- schema/snapshot.schema.json (Ajv) com additionalProperties:false, enum de região vindo de data/regioes.json, enum de dias/modalidades, maxLength 120.\n- Rejeitadores no NÍVEL DE VALOR, para toda string pública (hoje NÃO existem — conferi: FORBIDDEN_TOKENS em denylist.mjs:13-17 casa com NOME de chave, nunca com valor; PHONE_LIKE é o único check de valor): EMAIL_LIKE /[\\w.+-]+@[\\w-]+\\.[a-z]{2,}/i, URL embutida em texto, e mod-11 de CPF/CNPJ. Microssegundos, zero falso positivo, nada de Presidio nem LLM.\n- Allowlist de ESCRITA Unicode no ingest: normaliza NFC, aceita só Latin básico + diacríticos do português, rejeita cirílico/grego/fullwidth (U+FF00–U+FFEF) e mais de 1 marca combinante por caractere-base. Mata Zalgo e homóglifo. Homóglifo/script misto FORÇA VERMELHO — nunca \"avisa\" (aviso escrito numa linha verde que ninguém abre é decoração).\nDUAS CLASSES DE FALHA, e esta separação é obrigatória:\n- Falha de PRIVACIDADE (chave desconhecida, valor com cara de telefone/e-mail/CPF, cabeçalho divergente, linha não triada) → aborta o build inteiro. Correto.\n- Falha COSMÉTICA/de enumeração (região não reconhecida, tamanho, padrão) → QUARENTENA do registro: ele sai do snapshot e aparece em português no resumo (\"1 cadastro ficou de fora: região não reconhecida — <nome do grupo>\"), e o resto publica normalmente.\nPor que: com falha única, qualquer registro reprovável trava TODAS as publicações, inclusive as REMOÇÕES — que são justamente as que têm prazo legal. E vira botão barato de negação de serviço para quem quiser impedir a remoção do próprio conteúdo.\nCAMINHO DE REMOÇÃO INDEPENDENTE: a lista REMOVIDOS é aplicada sobre o snapshot anterior mesmo quando a ingestão de novos falha. Takedown sempre tem caminho.\n\n=== CAMADA 6 — DEPLOY E JANELA DO GIT ===\n- Settings > Pages > Source: de \"Deploy from a branch\" para \"GitHub Actions\".\n- ci.yml → publicar.yml com dois jobs: qa (checkout, setup-node 22, node --test tests/*.test.mjs, valida_contraste.mjs, ingerir_csv.mjs, publicar_snapshot.mjs, valida_snapshot.mjs, ajv, upload-pages-artifact@v3) e deploy (needs: qa, permissions pages:write + id-token:write, environment github-pages, concurrency pages com cancel-in-progress:false, deploy-pages@v5). qa vermelho = deploy pulado = site anterior continua no ar.\n- git rm --cached data/snapshot.json moderacao/aprovados.json; os dois entram no .gitignore; o snapshot passa a ser GERADO no runner. O histórico público fica com ZERO registro da comunidade, para sempre. Isso resolve o conflito entre \"apagar\" do art. 18, VI e o fato de blob antigo continuar acessível por SHA, em fork e em cache. Enquanto a Camada 4 não existir, o runner gera {registros: []} — que é exatamente o estado de lançamento já aprovado pelo dono (mapa vazio e convidativo).\n- Rastro de auditoria em duas superfícies, nenhuma no git: colunas auto-preenchidas na planilha (enviado_em, triagem, motivo, publicado_em, removido_em, consentimento_versao) e o histórico de Deployments do GitHub (quem aprovou, quando, imutável).\n\n=== CAMADA 7 — APROVAÇÃO INFORMADA (o gate humano precisa VER) ===\nO job qa escreve um diff em português no $GITHUB_STEP_SUMMARY e o workflow abre/atualiza uma issue \"Lote pendente de publicação\" listando cada registro que vai ENTRAR e SAIR (grupo · igreja · local · dia · horário · contato), marcando com ⚠ nome de grupo inédito e contato novo/alterado. A notificação que chega no celular passa a conter O QUE está sendo publicado, não só QUE algo está sendo publicado. Sem isso, a revisão humana existe no fluxograma e não na prática — e é ela que sustenta a frase pública do site.\nMICRO-FILA DE NOMES: uma visualização que mostra APENAS a coluna nome-do-grupo dos cadastros verdes. O olho passa por 100 nomes em ~30 segundos (1/40 do custo do campo-a-campo) e o lote verde exige UMA confirmação de lote (\"li os nomes dos grupos\"). Sem isso, o nome do grupo — 60 caracteres escolhidos pelo atacante — é publicado sem NENHUM olho humano.\nANTICLONE: escolher uma igreja da lista não pode, sozinho, valer confiança — o dropdown entrega ao atacante a grafia canônica da igreja real. Portanto: (a) combinação (organizacao+regiao) já publicada, ou nome normalizado já existente, vai VERMELHO (\"já existe grupo dessa igreja nessa região: é outro grupo ou é correção?\"), o que também mata o duplicado acidental; (b) o PRIMEIRO cadastro de cada organização é sempre vermelho, e ao aprovar o WhatsApp privado do cadastrante é gravado como \"responsável daquela igreja\" — cadastros seguintes só nascem verdes se bater; (c) qualquer alteração de contato num registro publicado volta para vermelho; (d) no site, \"informado pelo grupo, não confirmado pela igreja\" + link \"denunciar/corrigir este grupo\" em CADA popup.\n\n=== CAMADA 8 — CONSUMO NO NAVEGADOR ===\n- safeUrl (js/util.js:10-17) hoje aceita QUALQUER http(s) — conferi. Passa a testar a URL normalizada INTEIRA contra o MESMO padrão ancorado do formulário/ingest/schema (um único módulo compartilhado, quatro consumidores), proibindo query, fragmento e segmento extra. Allowlist de host é fraca demais: aceitaria https://www.instagram.com/accounts/login/?next=https://evil.example/.\n- rel=\"noopener\" (js/app.js:209) → \"noopener noreferrer nofollow\".\n- cleanField remove controles bidi e caracteres de largura zero ANTES do corte de 120 (Trojan Source).\n- css/style.css: .popup-grupo (linha 218) não tem regra de quebra — conferi. Entra overflow-wrap:anywhere e limite de 24 caracteres para o maior token do nome, senão um token único de 60 letras deforma o balão no celular.\n- MAX_RECORDS=500 (js/util.js:6) trunca em silêncio: passa a avisar no console e o gate reprova snapshot acima do teto.\n- tests/popup.test.mjs garantindo que popupFor() devolve Element, mais gate de grep que reprova string literal passada para bindPopup/bindTooltip/setContent (CVE-2025-69993).\n\n=== CAMADA 9 — OPERAÇÃO QUE NÃO APODRECE ===\n- Resumo diário por e-mail TODO DIA, inclusive com zero cadastro, com a IDADE da fila no ASSUNTO: \"movimenta7: 14 esperando, o mais antigo há 21 dias\". Assunto que muda sozinho é a única coisa que um dono não-técnico lê sem abrir. Silêncio vira alarme em vez de virar conforto.\n- Pedido de remoção sai do WhatsApp e vira FILA: segundo Google Form curtinho (\"corrigir ou remover meu cadastro\") apontando para a MESMA planilha, aba própria, com data de entrada e coluna ATENDIDO; formatação condicional pinta de vermelho o que passar de 7 dias. WhatsApp continua como canal alternativo, mas não pode ser o único registro — prazo do art. 18 correndo dentro de chat pessoal é dívida que só aparece vencida.\n- Watchdog agendado (6/6h) baixa a URL publicada e reprova se o texto cru contiver cabeçalho privado conhecido, PHONE_LIKE, EMAIL_LIKE ou CPF/CNPJ mod-11; ao falhar, abre ISSUE \"VAZAMENTO POSSÍVEL NA PLANILHA PÚBLICA — despublique agora\" (o GitHub notifica sozinho). É o ÚNICO detector de um vazamento que acontece dentro do Google, antes do CI.\n- O GitHub DESABILITA workflows agendados após 60 dias sem atividade no repositório — e 60 dias sem commit é o cenário ESPERADO no regime de gotejamento. O watchdog precisa de uma perna que gere atividade (commit de heartbeat ou atualização da issue de lote), e o runbook diz em uma frase o que fazer ao chegar o e-mail \"scheduled workflow disabled\": abrir Actions e tocar em \"Enable workflow\".\n- Disjuntor de enxurrada: acima de ~40 submissões/10 min, form.setAcceptingResponses(false), aviso ao dono e reabertura em 1 toque. Deduplicação por hash de conteúdo (grupo|organizacao|local|contato) colapsa idênticos em linha DUPLICADO.\n\n=== RISCO RESIDUAL QUE NENHUM DESENHO REMOVE ===\n1. Um adversário paciente que cadastra UM grupo plausível — igreja real, parque real, nome sóbrio, Instagram próprio — passa por tudo, porque é indistinguível de um cadastro legítimo. O sistema reduz a ESCALA e a VELOCIDADE do abuso, não a possibilidade de um abuso cuidadoso. O link \"denunciar\" existe porque a comunidade percebe antes do moderador.\n2. Link de convite de WhatsApp publicado: quem entra vê o telefone de todos os membros, e só o admin do grupo pode revogar. O site não desfaz isso depois de publicado.\n3. Comprometimento da conta Google do dono = comprometimento total de captação e moderação. O único controle é 2FA — não há como o desenho compensar isso.\n4. A URL \"publicar na web\" é anônima por construção: quem a receber lê todos os dados PÚBLICOS. Isso só é aceitável porque a Camada 4(b) garante que não há mais nada atrás dela.\n5. Nada impede o dono de parar de moderar. A Camada 9 transforma abandono em alarme visível, não em impossibilidade.",
+    "mudancas_obrigatorias": [
+      {
+        "mudanca": "Criar data/regioes.json como fonte única (rótulo do formulário → feição da camada, com sem_pin explícito), gerar o dropdown a partir dele, resolver o pin por ele, tirar o enum do schema dele, e corrigir norm() em publicar_snapshot.mjs para colapsar espaço interno. Teste que falha se um mapeamento não existir na camada.",
+        "motivo": "Bug VIVO hoje, achado na verificação e não visto por nenhum crítico: 6 das 36 opções do formulário não casam com as 33 feições do ra_df.geojson, e 3 delas falham por pura formatação de string — 'SCIA/Estrutural' vs 'SCIA', 'Sol Nascente/Pôr do Sol' vs 'Sol Nascente/  Pôr do Sol' (espaço duplo), 'Sudoeste/Octogonal' vs 'Sudoeste/ Octogonal'. No lançamento de hoje, grupos de algumas das RAs mais populosas do DF entram no contador e NUNCA aparecem no mapa, com o único sinal sendo um console.warn que o dono não vê. E o desenho proposto pioraria isso: gerar o enum do GeoJSON transformaria os 6 casos em build vermelho travando toda publicação.",
+        "severidade": "high"
+      },
+      {
+        "mudanca": "A aba PUBLICAR passa a ser montada com INDEX/MATCH resolvendo coluna por STRING de cabeçalho (nunca FILTER/QUERY por letra), com fail-closed para zero linhas se faltar cabeçalho; e o que é publicado na web passa a ser um SEGUNDO arquivo, que puxa só a aba PUBLICAR por IMPORTRANGE.",
+        "motivo": "Duas falhas que se somam e derrubam a garantia central do desenho. (1) Os rótulos da aba PUBLICAR são literais presos ao SLOT: quando uma coluna é inserida na aba de respostas, o conteúdo desloca mas o cabeçalho não — a checagem de conjunto de cabeçalhos passa e entrega o WhatsApp pessoal no campo 'contato', ou o nome pessoal dentro de 'local'. 'Mapear por nome, nunca por índice' é cumprido ao pé da letra e ainda assim vaza. (2) A tela 'Publicar na web' tem 'Documento inteiro' como padrão; um misclique publica TODAS as abas numa URL sem login — e isso acontece dentro do Google, antes de qualquer gate do repositório rodar. Com arquivo separado, as colunas privadas não existem no documento publicado.",
+        "severidade": "high"
+      },
+      {
+        "mudanca": "A triagem deixa de ser gatilho onFormSubmit e vira ARRAYFORMULA na planilha; TRIAGEM vazia pinta VERMELHO com o texto 'NÃO TRIADO'; a visualização 'Pendentes' filtra TRIAGEM<>'VERDE' (nunca ='VERMELHA'); ingerir_csv.mjs aborta se alguma linha APROVADO=TRUE tiver TRIAGEM vazia.",
+        "motivo": "Gatilho morre calado — autorização revogada por troca de senha, quota excedida, UrlFetch em timeout, ou o Google desabilitando após falhas repetidas. As linhas chegam BRANCAS: não são verdes e não são vermelhas. Um moderador treinado a 'ler só as vermelhas' abre o app, não vê vermelha nenhuma, conclui 'não tem nada pendente' e fecha — enquanto 9 pessoas esperam. Fórmula não tem autorização para expirar, nem quota, nem o bug de disparo duplo (Issue 144110219), e elimina de uma vez a necessidade de LockService e chave de idempotência.",
+        "severidade": "high"
+      },
+      {
+        "mudanca": "Os catálogos de locais e organizações passam a morar em abas protegidas da planilha privada, e o aprendizado vira COUNTIFS sobre linhas já aprovadas (sem caixinha 'ADICIONAR AO CATÁLOGO' e sem escrita); no repositório fica só a semente curada, alterada por commit revisado. Entrada de catálogo recusa qualquer string marcada como cara-de-endereço.",
+        "motivo": "Dois defeitos no mesmo ponto. (1) O catálogo em data/*.json não tem caminho de escrita que o dono consiga operar: a caixinha está no celular e o arquivo está no GitHub — as únicas saídas seriam alguém técnico editando JSON (não existe) ou um PAT no Apps Script (que o próprio desenho descartou). O catálogo congelaria e a fila vermelha nunca encolheria, quebrando por 3-4x a promessa de esforço que justifica o desenho inteiro. (2) Se o caminho existisse, seria pior: 'Casa da Ir. Maria - QNM 34 conj B casa 12' passa na validação de 4+ dígitos, e um toque distraído na rajada de lançamento commitaria um endereço residencial no histórico público imutável — exatamente o que a Camada do git existe para impedir, e que só sai com cirurgia de histórico proibida pela REGRA ZERO.",
+        "severidade": "high"
+      },
+      {
+        "mudanca": "Separar duas classes de falha no gate: privacidade (chave desconhecida, valor com cara de telefone/e-mail/CPF, cabeçalho divergente, linha não triada) aborta o build inteiro; enumeração/formato (região não reconhecida, tamanho, padrão) QUARENTENA só aquele registro e publica o resto, reportando em português. Além disso, a lista REMOVIDOS é aplicada sobre o snapshot anterior mesmo quando a ingestão de novos falha.",
+        "motivo": "Com falha única, um só registro reprovável trava TODAS as publicações — inclusive as REMOÇÕES, que são as únicas com prazo legal (art. 18). O dono, que por desenho nunca abre terminal nem lê JSON, vê um X vermelho em inglês e não tem caminho para achar a linha culpada; o sistema fica travado até aparecer alguém técnico. Pior: vira botão barato e repetível de negação de serviço para quem descobrir qualquer entrada que passe na triagem e reprove no schema — inclusive para impedir a remoção do próprio conteúdo. E, com o bug de região confirmado, esse cenário não precisa de atacante nenhum: um cadastro legítimo do Entorno já bastaria.",
+        "severidade": "high"
+      },
+      {
+        "mudanca": "Tirar da trilha de auto-aprovação os três campos que o atacante controla: combinação (organizacao+local+dia) inédita sempre VERMELHA, primeiro cadastro de cada organização sempre vermelho com o WhatsApp privado virando 'responsável', contato NOVO ou ALTERADO sempre vermelho, micro-fila de relance nos nomes dos grupos verdes com confirmação de lote, e o botão Approve passando a MOSTRAR o que entra e sai.",
+        "motivo": "O desenho vende o dropdown de igreja como defesa contra falsificação, e é o inverso: ele entrega ao atacante a grafia canônica da igreja verdadeira E transforma essa escolha em sinal de confiança que dispara a auto-aprovação. Basta copiar do próprio site uma igreja e um local já publicados, não marcar 'Famílias com crianças' e pôr um link de grupo bem formado — o cadastro nasce VERDE, o dono é instruído a não tocar nas verdes, e o nome livre de 60 caracteres (ofensa, difamação nominal, Zalgo) nunca é lido por ninguém. O clone de grupo real com o contato trocado é o ataque mais barato contra este desenho e não exige nenhuma esperteza. A 'revisão humana' que o site promete por escrito viraria toque reflexo num botão que não mostra conteúdo.",
+        "severidade": "high"
+      }
+    ],
+    "esforco_do_dono": "Honestamente: MAIS do que o desenho original prometia, porque as correções de segurança custam tempo real. E ainda assim uma ordem de grandeza abaixo do processo de hoje.\n\nRajada de 100 cadastros na semana de lançamento: praticamente todos passam pela fila vermelha pelo menos uma vez, porque toda combinação igreja+local+dia é inédita no começo — é o preço de fechar o caminho do clone. Mas ler uma linha vermelha é rápido: o motivo já vem escrito em português e a decisão é olhar UM campo. Realista: 20 a 35 minutos no total, espalhados pela semana, no celular, com os vermelhos no topo. Some ~1 minuto para o relance na lista de nomes dos grupos. (O desenho original prometia 12-18 min; essa diferença é o custo das travas anticlone e da micro-fila de nomes, e eu prefiro ser exato a ser otimista.)\n\nSemana 3 em diante, catálogo cheio e combinações conhecidas: 15 a 25 vermelhos por 100 → 5 a 8 minutos, mais o relance de nomes.\n\nRegime de gotejamento (2 a 5 cadastros por semana), que é o estado permanente: menos de 2 minutos por semana, e ele pode deixar acumular sem prejuízo.\n\nPublicar, sempre: 1 toque em \"Publicar agora\" e 1 toque em \"Approve\" — só que agora a notificação MOSTRA quem entra e quem sai, então o toque é informado e vira prova de auditoria com data, hora e nome. Site no ar em ~2 minutos.\n\nTirar um grupo do ar: desmarca a caixinha (ou marca REMOVER) e repete os dois toques. Menos de 1 minuto do celular. Como nada pessoal entrou no git, \"sair do site\" é realmente sair.\n\nO que ele NUNCA mais faz: abrir moderacao/aprovados.json, copiar 13 campos à mão, rodar node, dar commit e push. Hoje isso é ~2-3 minutos POR cadastro — 3 a 5 horas para 100. O ganho é esse.\n\nO que ele passa a fazer e hoje não faz: ler um e-mail por dia cujo ASSUNTO diz a idade da fila (\"14 esperando, o mais antigo há 21 dias\"). É a única coisa que impede o sistema de apodrecer em silêncio, e custa 5 segundos.",
+    "plano_de_construcao": [
+      {
+        "etapa": "1. Dia 1 seguro (HOJE, antes de qualquer cadastro real ser publicado)",
+        "entrega": "data/regioes.json como fonte única + norm() corrigido + teste que trava a regressão (mata o bug vivo dos 6 rótulos sem pin). Formulário endurecido e gerado a partir dessa lista. Pages migrado de branch para GitHub Actions, publicar.yml com deploy needs:qa (o CI deixa de ser decorativo). git rm --cached dos dois arquivos ainda vazios + .gitignore — janela irreversível fechada para sempre; o runner gera {registros: []}, que é exatamente o mapa vazio e convidativo já aprovado pelo dono. Correções grátis de front: overflow-wrap no .popup-grupo, noopener noreferrer nofollow, texto de privacidade do index.html ajustado para o que o sistema realmente entrega. Valor sozinho: o site sobe hoje, o formulário coleta dado limpo desde o primeiro minuto, nenhuma RA some do mapa em silêncio, e o dado da comunidade nunca toca o histórico público. Publicação de cadastro real fica suspensa até a etapa 2 — o formulário coleta normalmente enquanto isso.",
+        "esforco": "~3h, hoje"
+      },
+      {
+        "etapa": "2. Pins sem digitação (o pipeline pull)",
+        "entrega": "Aba PUBLICAR por INDEX/MATCH com fail-closed; segunda planilha 'movimenta7 — público' por IMPORTRANGE, e só ela publicada na web. scripts/ingerir_csv.mjs com parser RFC4180 de verdade, igualdade exata de cabeçalhos, selo versao_publicacao com cache-busting e aborto em português quando o CSV vier velho. campos_publicos.mjs (allowlist) substituindo a denylist como controle primário, schema Ajv com additionalProperties:false, rejeitadores de valor (e-mail, CPF/CNPJ mod-11, URL embutida), allowlist Unicode de escrita, quarentena para falha cosmética, caminho de remoção independente do ingest, higiene de log. Padrão ancorado único de contato compartilhado por formulário, ingest, schema e safeUrl. Valor sozinho: acaba a digitação — o dono marca a caixinha e o pin aparece.",
+        "esforco": "1 a 2 dias"
+      },
+      {
+        "etapa": "3. A fila se separa sozinha",
+        "entrega": "Triagem inteira em ARRAYFORMULA (sem gatilho para morrer), coluna MOTIVO em português, vazio pintando VERMELHO como 'NÃO TRIADO', visualização 'Pendentes' filtrando <>VERDE, aborto no ingest para linha aprovada sem triagem. Catálogos em abas protegidas, semeados uma vez, aprendendo por COUNTIFS sobre o que já foi aprovado — sem caixinha, sem script, sem PAT. E-mail diário com a idade da fila no assunto, enviado inclusive com zero cadastro. Valor sozinho: é aqui que o esforço do dono despenca e para de crescer com o tempo.",
+        "esforco": "1 dia"
+      },
+      {
+        "etapa": "4. Aprovar vendo o que entra",
+        "entrega": "Diff em português no step summary e issue 'Lote pendente de publicação' listando cada registro que entra e sai, com ⚠ em nome inédito e contato novo. Micro-fila de relance nos nomes dos grupos verdes com confirmação de lote. Regras anticlone: combinação inédita sempre vermelha, primeiro cadastro por organização com responsável gravado, contato alterado voltando para vermelho, homóglifo/script misto forçando vermelho, cruzamento do nome privado do cadastrante contra grupo/organizacao/local. Link 'denunciar/corrigir este grupo' em cada popup. Valor sozinho: fecha o caminho do cadastro forjado copiado do próprio site e torna verdadeira a frase pública de revisão humana.",
+        "esforco": "1 dia"
+      },
+      {
+        "etapa": "5. Remoção com prazo e vigia na planilha",
+        "entrega": "Segundo formulário de correção/remoção alimentando uma aba datada com coluna ATENDIDO e alerta visual acima de 7 dias (o pedido do art. 18 sai do chat pessoal e ganha relógio). Watchdog agendado que baixa a URL publicada e abre issue em português ao detectar cabeçalho privado, telefone, e-mail ou CPF/CNPJ. Perna de heartbeat contra o desligamento automático de workflows agendados após 60 dias, mais o runbook de uma frase para quando o e-mail do GitHub chegar. Valor sozinho: passa a existir um detector para o vazamento que acontece dentro do Google, antes do CI — hoje o único detector é o dono tentando publicar.",
+        "esforco": "meio dia"
+      },
+      {
+        "etapa": "6. Política de contato e antienxurrada",
+        "entrega": "Consentimento versionado e específico para publicar link de grupo do WhatsApp, com instrução de pôr o grupo em 'aprovação do admin'; regra dura de que grupo marcado 'Famílias com crianças' nunca publica link de grupo aberto. Reconfirmação periódica dos registros com link de convite e caminho de um toque para revogar contato. Disjuntor de submissões (setAcceptingResponses false acima do limiar, reabertura em 1 toque) e deduplicação por hash de conteúdo. Valor sozinho: alinha a promessa do site ao que o sistema entrega quando links de convite são publicados.",
+        "esforco": "meio dia"
+      }
+    ],
+    "decisoes_para_o_dono": [
+      "LINK DE GRUPO DO WHATSAPP: quem entra num grupo vê o telefone de TODOS os membros — normalmente 15 a 40 pessoas identificadas, ligadas publicamente à igreja e a um lugar e horário fixos, e nenhuma delas preencheu o formulário nem consentiu. Publicar o link é o que a maioria dos grupos pequenos consegue oferecer; exigir @ do Instagram ou contato pela moderação protege essas pessoas mas deixa de fora quem só tem o grupo. Três caminhos: (a) aceitar link de grupo com um consentimento extra no formulário dizendo que o líder avisou os participantes; (b) só Instagram ou contato mediado, e grupo sem isso não entra no mapa; (c) o meio-termo que eu recomendo — aceitar link com o consentimento extra, e proibir link de grupo apenas quando marcado 'Famílias com crianças'. Qual?",
+      "NOME DO PROFISSIONAL DE EDUCAÇÃO FÍSICA: publicar o nome dele é o sinal de credibilidade que o campo existe para dar. Mas é o único dado do site que nomeia uma pessoa identificada ao lado de filiação religiosa, e quase nunca é ela quem preenche o formulário — ou seja, é dado de terceiro sem consentimento dela. A alternativa é publicar só 'com acompanhamento profissional: sim' e, no máximo, o número do CREF (que qualquer um confere no site do conselho). Perde credibilidade visível, ganha segurança jurídica. Tira o nome?",
+      "QUANTO TEMPO VOCÊ ACEITA GASTAR NA SEMANA DO LANÇAMENTO: a trava que impede alguém de clonar um grupo real trocando o contato faz TODA combinação nova (igreja+local+dia) passar uma vez pela sua fila vermelha. Isso custa 20 a 35 minutos ao longo da primeira semana de 100 cadastros, e depois cai sozinho para 5 a 8 minutos por 100. Se você achar demais, dá para afrouxar — vermelho só quando o LOCAL ou a IGREJA forem novos, ignorando a combinação — e cai para uns 12 a 18 minutos. O custo do afrouxamento é reabrir o caminho do clone, que é o ataque mais barato contra este sistema. Aperta ou afrouxa?",
+      "A FRASE DO SITE: hoje o index.html promete 'Nada entra no site sem revisão humana'. Depois destas mudanças o que acontece de verdade é: toda publicação é autorizada por você com registro de data e hora, você vê a lista do que entra e sai antes de aprovar, e cadastros fora do padrão (igreja nova, local novo, combinação inédita, contato novo, atividade com crianças) são lidos um a um — mas os cadastros padrão não são relidos campo a campo. Sugiro trocar por: 'Toda publicação é autorizada por uma pessoa, com registro de data e hora. Cadastros fora do padrão são lidos um a um antes de entrar. Seu nome e telefone pessoais nunca são publicados. Pedido de remoção sai do ar no mesmo dia.' É mais honesto e continua sendo promessa de revisão humana — e a promessa é sua, não minha. Aprova o texto?"
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Pesquisa"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Desenho"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Ataque"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 4,
+      "title": "Veredito"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "pesquisa:moderation-patterns",
+      "phaseIndex": 1,
+      "phaseTitle": "Pesquisa",
+      "agentId": "a4d799b1002908b10",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787545296001,
+      "queuedAt": 1787545291834,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787545865482,
+      "tokens": 97845,
+      "toolCalls": 38,
+      "durationMs": 569446,
+      "resultPreview": "{\"findings\":[{\"claim\":\"Discourse — the reference small-community platform run by one or two volunteer mods — implements risk-based auto-approval as a small catalog of discrete triggers, not a score: 'Watched Words' with per-word actions (Block, Censor, Require Approval, Flag, Replace, Tag, Silence), plus approval settings keyed on trust level / group / post count (approve_unless_allowed_groups, ap…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "pesquisa:google-stack",
+      "phaseIndex": 1,
+      "phaseTitle": "Pesquisa",
+      "agentId": "afe85ee72b7fc2396",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787545296263,
+      "queuedAt": 1787545291835,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787545801507,
+      "tokens": 92399,
+      "toolCalls": 38,
+      "durationMs": 503855,
+      "resultPreview": "{\"findings\":[{\"claim\":\"Conta Google comum (gmail.com) tem cotas de Apps Script bem menores que Workspace: 90 minutos/dia de tempo TOTAL de triggers (Workspace: 6h), 6 minutos por execução, 20.000 chamadas UrlFetch/dia, máximo de 20 triggers por script por usuário, e Script Properties limitado a 500 KB por store / 9 KB por valor. Estourar a cota lança exceção e interrompe a execução.\",\"why_it_matte…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "pesquisa:lgpd-legal (retry 1)",
+      "phaseIndex": 1,
+      "phaseTitle": "Pesquisa",
+      "agentId": "a2eeb9e061bc88c9e",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787545804908,
+      "queuedAt": 1787545291845,
+      "attempt": 2,
+      "lastAttemptReason": "stalled",
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787584062463,
+      "tokens": 170829,
+      "toolCalls": 63,
+      "durationMs": 38257487,
+      "resultPreview": "{\"findings\":[{\"claim\":\"Religious conviction and membership in a religious organization are sensitive data under LGPD art. 5, II — and art. 11 is an EXHAUSTIVE closed list of legal bases that, unlike GDPR art. 9(2), contains NO exception for religious/non-profit bodies processing their own members' data (GDPR 9(2)(d)) and NO exception for data 'manifestly made public by the data subject' (GDPR 9(2)…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "pesquisa:publish-pipeline (retry 1)",
+      "phaseIndex": 1,
+      "phaseTitle": "Pesquisa",
+      "agentId": "a30510ef43e058dd5",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787545868882,
+      "queuedAt": 1787545291845,
+      "attempt": 2,
+      "lastAttemptReason": "stalled",
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787584027684,
+      "tokens": 151570,
+      "toolCalls": 51,
+      "durationMs": 38158781,
+      "resultPreview": "{\"findings\":[{\"claim\":\"The repo's Pages site is on build_type \\\"legacy\\\", which means the CI job in .github/workflows/ci.yml has NO power to stop a deploy: GitHub builds and publishes on push independently of Actions results. The GitHub REST API defines exactly two values — \\\"legacy\\\" (\\\"the site is built by GitHub when changes are pushed to a specific branch\\\") and \\\"workflow\\\" (\\\"the site is bui…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "sintese-arquitetura",
+      "phaseIndex": 2,
+      "phaseTitle": "Desenho",
+      "agentId": "adfb8a388fef9b3ec",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787584070164,
+      "queuedAt": 1787584065497,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "\"Por cadastro individual, na esmagadora maioria dos casos: …",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787584470213,
+      "tokens": 93477,
+      "toolCalls": 8,
+      "durationMs": 400031,
+      "resultPreview": "{\"recommended\":{\"name\":\"Duas filas e um catálogo que aprende (pull sem segredo, deploy com trava humana)\",\"how_it_works\":\"CAMADA 1 — reduzir o texto livre no próprio formulário (scripts/criar_form.gs reescrito).\\nHoje 7 campos de texto livre entram sem nenhuma validação. Passam a ser:\\n- 'Igreja ou organização': vira addListItem() alimentado por uma lista curada de igrejas do DF (data/organizacoes…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "ataque:pii-leak",
+      "phaseIndex": 3,
+      "phaseTitle": "Ataque",
+      "agentId": "ac322fe5fe6219492",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787584475711,
+      "queuedAt": 1787584472711,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NAO construir como esta — mas o problema nao e a arquitetur…",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787584884147,
+      "tokens": 73554,
+      "toolCalls": 7,
+      "durationMs": 408433,
+      "resultPreview": "{\"holes\":[{\"attack\":\"1) O desenho acrescenta 7 colunas auxiliares (TRIAGEM, MOTIVO, APROVADO, enviado_em, publicado_em, removido_em, consentimento_versao) NA MESMA aba onde o Forms grava, e onde ficam 'Seu nome (PRIVADO)' e 'Seu WhatsApp (PRIVADO)' (scripts/criar_form.gs, dois ultimos addTextItem). 2) A aba PUBLICAR e montada com FILTER/QUERY, que seleciona coluna por LETRA — e posicional por cons…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "ataque:abuse",
+      "phaseIndex": 3,
+      "phaseTitle": "Ataque",
+      "agentId": "a0d9b02c9574d4650",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787584475976,
+      "queuedAt": 1787584472715,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "MUDAR ANTES DE CONSTRUIR. O desenho é forte exatamente onde…",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787584927024,
+      "tokens": 78909,
+      "toolCalls": 11,
+      "durationMs": 449325,
+      "resultPreview": "{\"holes\":[{\"attack\":\"A FILA VERDE PUBLICA TEXTO ESCOLHIDO PELO ATACANTE, SEM NINGUÉM LER.\\n1. O repositório é PÚBLICO e está linkado no rodapé do site. O atacante abre `data/organizacoes.json` e `data/locais_publicos.json` e lê exatamente as strings que fazem um cadastro nascer VERDE.\\n2. Preenche o formulário 100%% dentro da fila verde: Igreja = 'IASD Central de Brasília' (item do dropdown), Regi…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "ataque:operacional",
+      "phaseIndex": 3,
+      "phaseTitle": "Ataque",
+      "agentId": "a19cd5560b214583f",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787584888912,
+      "queuedAt": 1787584472727,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Não construir como está — mas o problema NÃO é a espinha de…",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787585165624,
+      "tokens": 67728,
+      "toolCalls": 8,
+      "durationMs": 276694,
+      "resultPreview": "{\"holes\":[{\"attack\":\"PASSO 1: Jorge abre a planilha privada, vai em Arquivo > Compartilhar > Publicar na web. A tela tem DOIS controles lado a lado: um dropdown 'Documento inteiro / PUBLICAR' e um dropdown de formato. O padrão do primeiro é 'Documento inteiro'. PASSO 2: ele muda o formato para CSV (que é o que a instrução manda) e esquece — ou desfaz meses depois ao republicar — o primeiro dropdow…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "veredito-final",
+      "phaseIndex": 4,
+      "phaseTitle": "Veredito",
+      "agentId": "ac937fb05de5a7598",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1787585171157,
+      "queuedAt": 1787585168072,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Sobrevive — mas não como está escrito. A espinha de seguran…",
+      "promptPreview": "PROJECT CONTEXT (movimenta7) — read carefully, recommendations must fit THIS reality:\n- A community project: physical-activity groups of the Adventist community in Brasilia/DF, Brazil, open to everyone.\n- Public site is a STATIC site: vanilla JS, no backend, hosted on GitHub Pages, repo JorgeYuriDj/movimenta7 (public).\n  The site reads data/snapshot.json from the repo. Map is Leaflet 1.9.4, pins p…",
+      "lastProgressAt": 1787585833761,
+      "tokens": 97217,
+      "toolCalls": 17,
+      "durationMs": 662579,
+      "resultPreview": "{\"veredito\":\"Sobrevive — mas não como está escrito. A espinha de segurança está certa e eu não consegui derrubá-la: pull sem segredo de longa duração nas duas pontas, allowlist de campos em vez de denylist, deploy com needs:qa (o furo real de hoje — conferi: .github/workflows/ci.yml não tem job de deploy, então o Pages sobe por branch e o CI é decorativo), e tirar do git os dois arquivos ainda vaz…"
+    }
+  ],
+  "totalTokens": 923528,
+  "totalToolCalls": 241
+}

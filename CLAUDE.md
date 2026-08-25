@@ -39,6 +39,14 @@ Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorg
    inglês, saída em português.
 8. Números públicos sempre REAIS — nunca inflar (regra do dono).
 9. Encoding: `open(path, "w", encoding="utf-8")` em qualquer script Python; UTF-8 em tudo.
+10. **Cor e fonte têm gate.** Mexeu em token de cor em `css/style.css`? Atualize `PAIRS` em
+    `scripts/valida_contraste.mjs:22-39` e rode — contraste é validado por FÓRMULA, nunca a olho
+    (D9). Fontes são **self-hosted** em `assets/fonts/` e não podem virar CDN: a CSP da página é
+    `default-src 'self'`. Método visual vem da pesquisa em `C:\dev\ifp-plataforma\docs\`
+    (`ESPECIALISTA_FRONTEND_UX.md`, `PLANO_UX.md`) — a aparência é nossa, o método é de lá.
+11. **Nenhuma chave de API no repositório** — ele é público. Isso descarta mapa 3D
+    (Cesium/Google Photorealistic Tiles) e qualquer serviço que exija credencial no cliente.
+    Decidido em 25/08/2026 ao avaliar o projeto `gods-eye-view`. Só muda se houver servidor.
 
 ## Revisão externa (Codex)
 Ciclo em marcos (fim Fase 1, fim Fase 2, antes da Fase 3): `_revisao_codex/PROMPT_ANALISE_SISTEMA.md`.

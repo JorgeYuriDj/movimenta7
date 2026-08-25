@@ -15,6 +15,6 @@
    precisa falar com o movimenta7 usa o formulário.
    ============================================================ */
 window.MOV7_CONFIG = {
-  FORM_URL: "https://docs.google.com/forms/d/e/1FAIpQLSfb07atFzG4a_TfTIp8LINg6hNb0A5QtIu06HyRiu6W2KSfZw/viewform",
+  FORM_URL: "https://docs.google.com/forms/d/e/1FAIpQLSfWpfsteBTzJ3_d4Y-JQjlb4IBl3ep9QM4m8KpWwWDYK0MO2A/viewform",
   REPO_URL: "https://github.com/JorgeYuriDj/movimenta7",
 };

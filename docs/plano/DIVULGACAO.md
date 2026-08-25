@@ -30,7 +30,7 @@ Formulário: https://docs.google.com/forms/d/e/1FAIpQLSfWpfsteBTzJ3_d4Y-JQjlb4IB
 > adventista do DF, aberto a toda Brasília.
 >
 > Sua igreja tem grupo de corrida, caminhada, vôlei, ciclismo, funcional ou trilha?
-> **Cadastre em 2 minutos e o grupo entra no mapa sozinho, em cerca de 10 minutos** — não tem
+> **Cadastre em 2 minutos e o grupo entra no mapa sozinho, em até 1 hora** — não tem
 > fila, não tem aprovação, não tem ninguém no meio.
 >
 > 📋 Cadastrar: [LINK DO FORMULÁRIO]
@@ -63,10 +63,10 @@ o mapa, não um número escolhido.
 
 **"Quem aprova o meu cadastro?"**
 Ninguém. Uma checagem automática confere que não passou dado pessoal nem link estranho, e o grupo
-entra no mapa na rodada seguinte (~10 minutos).
+entra no mapa na rodada seguinte — em até 1 hora.
 
 **"Cadastrei e não apareceu."**
-Três causas, nesta ordem: (1) ainda não passaram 10 minutos; (2) a pessoa usou o **formulário
+Três causas, nesta ordem: (1) ainda não passou 1 hora; (2) a pessoa usou o **formulário
 antigo** — ele continua ativo e ainda recebe respostas, mas elas nunca chegam ao mapa, então é
 refazer no link novo; (3) a checagem recusou o cadastro por ter telefone, e-mail ou nome de pessoa
 em algum campo — o log do GitHub diz a linha e o campo, nunca o conteúdo.

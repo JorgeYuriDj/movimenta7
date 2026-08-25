@@ -116,7 +116,11 @@ function updateSelo() {
   if (!el) return;
   const idade = descreveIdade(ATUALIZADO_EM);
   if (!idade) { el.classList.add("oculto"); return; }
-  el.textContent = "Lista atualizada " + idade + ". Cadastros novos entram sozinhos, a cada ~10 minutos.";
+  // "até 1 hora", não "~10 minutos": o cron pede 10, mas o GitHub agrupa
+  // agendamentos de repositório público. Medido em 25/08/2026, 5 rodadas
+  // seguidas: 40, 47, 43 e 55 minutos de intervalo real. Número publicado é
+  // sempre o medido — prometer 10 seria criar um defeito que não existe.
+  el.textContent = "Lista atualizada " + idade + ". Cadastros novos entram sozinhos, em até 1 hora.";
   el.classList.remove("oculto");
 }
 

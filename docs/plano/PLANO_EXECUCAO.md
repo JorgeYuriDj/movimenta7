@@ -1,5 +1,12 @@
 # PLANO DE EXECUÇÃO — movimenta7
 
+> ⚠️ **Parte deste plano foi vencida pelos ADRs 0005 e 0006 (24–25/08/2026).** Onde este documento
+> falar em **moderação humana**, coluna **`APROVADO=SIM`**, **botão de WhatsApp** ou **planilha
+> privada com nome e telefone**, quem manda é o
+> [ADR-0006](../adr/0006-publicacao-automatica-sem-dado-pessoal.md): publicação automática, zero
+> dado pessoal coletado, sem canal por telefone. O restante (fases, decisões D1–D10 de stack,
+> segurança e UX) continua valendo. Para divulgar, use [`DIVULGACAO.md`](DIVULGACAO.md).
+
 > **Status: APROVADO pelo dono em 23/08/2026** — execução liberada.
 > Escrito em 23/08/2026, com base em: código real do `mapa-embaixadores-2026`, pesquisa de
 > frontend do `ifp-plataforma`, ciclo de revisão Codex do `ifp-plataforma`, base "Engenharia

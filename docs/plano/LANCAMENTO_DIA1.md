@@ -1,5 +1,13 @@
 # Lançamento Fase 0 — AMANHÃ (24/08/2026)
 
+> ⛔ **DOCUMENTO DATADO (23/08/2026) — NÃO USE PARA DIVULGAR.** O desenho descrito aqui acabou
+> em 25/08/2026 com o [ADR-0006](../adr/0006-publicacao-automatica-sem-dado-pessoal.md): não há
+> mais fila de aprovação (`APROVADO=SIM`), não há botão de WhatsApp e o formulário **não coleta
+> nenhum dado pessoal**. Em particular, o aviso de privacidade no fim desta página — *"seu nome e
+> telefone pessoais ficam privados com a moderação"* — **hoje é falso**.
+> **Para divulgar, use [`DIVULGACAO.md`](DIVULGACAO.md).** Este arquivo fica como registro do que
+> foi planejado no dia 23.
+
 > Objetivo do dia: **divulgar e começar os cadastros.**
 > Landing **com o mapa do DF já visível** (decisão do dono, 23/08: mapa desde o dia 1, mesmo
 > vazio — ele se preenche conforme os cadastros são aprovados) + formulário + WhatsApp +

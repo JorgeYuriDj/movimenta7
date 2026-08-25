@@ -18,8 +18,10 @@ Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorg
    ⚠️ **Nenhum cadastro é publicado editando `moderacao/aprovados.json` à mão** — repo público
    tem histórico permanente e isso conflita com o direito de exclusão (ADR-0005, decisão 1).
    O caminho é a planilha → `scripts/ingerir_csv.mjs`.
-3. **Publicação é AUTOMÁTICA** (ADR-0006): não há fila de aprovação; cron de 10 min publica
-   quem preencheu o formulário. Daí a assimetria que **não pode ser "consertada"**: erro
+3. **Publicação é AUTOMÁTICA** (ADR-0006): não há fila de aprovação. O cron PEDE 10 min, mas o
+   GitHub enfileira agendamento de repo público — medido em 25/08/2026, 5 rodadas: 40, 47, 43 e
+   55 min. **Número publicado ao visitante é sempre o medido ("até 1 hora"), nunca o pedido.**
+   Para publicar na hora: Actions > ci e publicacao > Run workflow (~40 s). Daí a assimetria que **não pode ser "consertada"**: erro
    estrutural (coluna inesperada, CSV vazio) **aborta tudo**; erro de um cadastro (dado pessoal,
    região inválida, link fora da lista) **pula só aquele e segue**. Fail-closed por registro
    entregaria a qualquer pessoa o poder de congelar o site preenchendo o formulário com lixo.
@@ -47,6 +49,19 @@ Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorg
 11. **Nenhuma chave de API no repositório** — ele é público. Isso descarta mapa 3D
     (Cesium/Google Photorealistic Tiles) e qualquer serviço que exija credencial no cliente.
     Decidido em 25/08/2026 ao avaliar o projeto `gods-eye-view`. Só muda se houver servidor.
+
+12. **Fórmula de planilha ligada ao Forms NUNCA pode ter linha fixa.** Cada resposta do Google
+    Forms é uma INSERÇÃO de linha, e inserção empurra referência absoluta (`$A$2` vira `$A$3`,
+    `$A$4`…) — a fórmula fica eternamente uma linha abaixo do cadastro mais novo e não acha nada.
+    Só **coluna inteira** (`$A:$ZZ`) sobrevive; o cabeçalho sai por nome, não por pular a linha 1.
+    Custou 25/08/2026 inteiro: 2 cadastros na planilha, 0 pins, CI verde o tempo todo.
+    Congelado em `tests/criar_form.test.mjs`. ⚠️ **Modo de falha a temer neste projeto: silencioso.**
+    Qualquer `#N/A` dentro do `FILTER` vira `""` pelo `IFERROR` e a aba fica vazia sem erro nenhum.
+13. **`git push` não alcança o Google Drive.** Consertar a fórmula no repo NÃO conserta a planilha
+    que já está em uso — ela precisa de `consertarAbaPublicar` (Apps Script) ou da colagem de
+    `scripts/PUBLICAR_A2.txt`. E **nunca mande um caminho de arquivo para o dono colar** (ele não
+    é técnico e colou o caminho): ponha o texto na área de transferência dele com
+    PowerShell `Set-Clipboard`.
 
 ## Revisão externa (Codex)
 Ciclo em marcos (fim Fase 1, fim Fase 2, antes da Fase 3): `_revisao_codex/PROMPT_ANALISE_SISTEMA.md`.

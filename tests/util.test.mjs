@@ -207,3 +207,17 @@ test("every modality the form offers has its own pin", () => {
   assert.deepEqual(genericas, [],
     `o formulario oferece modalidades sem pin proprio: ${genericas.join(", ")}`);
 });
+
+/* Leaflet's stylesheet is fetched at runtime by js/app.js, so it lands in the
+   <head> AFTER css/style.css and wins every tie on source order. `display` is
+   the one that matters: .leaflet-marker-icon sets it to block, which would drop
+   the emoji into the corner of the circle instead of its centre. Two classes
+   beat one — and the day someone "simplifies" this back to a single class, the
+   pins go subtly wrong in a way no test would otherwise notice. */
+test("the pin's display rule outranks the Leaflet stylesheet loaded after it", () => {
+  const css = readFileSync(new URL("../css/style.css", import.meta.url), "utf8");
+  const at = css.indexOf(".leaflet-marker-icon.pin-mov");
+  assert.notEqual(at, -1,
+    "a regra de display do pin precisa dos DOIS seletores para vencer o Leaflet");
+  assert.match(css.slice(at, css.indexOf("}", at)), /display:\s*grid/);
+});

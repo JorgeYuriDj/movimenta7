@@ -417,7 +417,6 @@ h3 { font-size: 1.15rem; }
 .pin-mov {
   --pin-emoji: "🤸";
   width: 38px; height: 38px;
-  display: grid; place-items: center;
   background: var(--surface);
   border: 2px solid var(--brand);
   border-radius: 50%;
@@ -428,6 +427,14 @@ h3 { font-size: 1.15rem; }
   font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
   transition: transform 160ms var(--entrada);
 }
+/* DOIS seletores de propósito, e não `.pin-mov` sozinho: o CSS do Leaflet é
+   carregado sob demanda por js/app.js e entra no <head> DEPOIS deste arquivo,
+   trazendo `.leaflet-marker-icon { display: block }`. Com a mesma
+   especificidade, quem vem depois ganha — e o emoji iria parar no canto de cima
+   do círculo em vez do meio. Duas classes vencem uma. Conferido no leaflet
+   1.9.4, que é a versão fixada com SRI em js/app.js. */
+.leaflet-marker-icon.pin-mov { display: grid; place-items: center; }
+
 .pin-mov::before { content: var(--pin-emoji); }
 .pin-mov:hover { transform: scale(1.15); }
 .pin-mov:focus-visible { outline: 3px solid var(--foco); outline-offset: 3px; }

@@ -231,6 +231,19 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(0);
   }
 
+  // Aconteceu de verdade em 25/08: o valor colado na variável foi o texto do
+  // guia ("Value = o endereço"), não a URL. Sem esta checagem, o new URL() logo
+  // abaixo estoura um TypeError cru — um build vermelho a cada 10 minutos cuja
+  // mensagem não diz a ninguém o que fazer. O erro é do dono, mas a mensagem
+  // ilegível era nossa.
+  if (!/^https?:\/\//i.test(URL_CSV)) {
+    fail("PLANILHA_CSV_URL nao e um endereco de internet.\n" +
+      "  Parece que foi colado o texto do passo a passo em vez da URL.\n" +
+      "  O valor certo comeca com https://docs.google.com/ e sai de:\n" +
+      "  planilha > Arquivo > Compartilhar > Publicar na web > aba PUBLICAR > .csv > Publicar.\n" +
+      "  Troque em: Settings > Secrets and variables > Actions > Variables.");
+  }
+
   // A URL publicada do Google é servida de um cache de ~5 minutos. Sem furar
   // esse cache, um pedido de REMOÇÃO pode falhar em silêncio: a rodada leria a
   // versão velha da planilha, republicaria o grupo que acabou de sair e o CI

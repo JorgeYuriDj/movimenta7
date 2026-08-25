@@ -60,8 +60,12 @@ certo: ainda não há cadastro nenhum.
 
 1. Abra: https://github.com/JorgeYuriDj/movimenta7/settings/variables/actions
 2. Botão **New repository variable**
-3. Name: `PLANILHA_CSV_URL`
-4. Value: o endereço que você copiou
+3. No campo **Name**, escreva: `PLANILHA_CSV_URL`
+4. No campo **Value**, cole **o endereço que o Google te deu na Parte 2** — e só ele.
+   Ele começa com `https://docs.google.com/` e termina com `output=csv`.
+   ⚠️ Não escreva as palavras "Value" nem "o endereço": é só a URL, nada mais.
+   (Aconteceu em 25/08: o texto deste passo foi colado no lugar da URL. Hoje a
+   ingestão detecta e explica no log, em vez de estourar um erro incompreensível.)
 5. **Add variable**
 
 Pronto. Em até 10 minutos o primeiro pin aparece.

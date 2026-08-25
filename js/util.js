@@ -1,18 +1,124 @@
 /* Pure helpers, covered by tests/util.test.mjs.
    Security invariant (ADR-0004): every data-borne string is cut hard at
-   MAX_FIELD chars and only ever reaches the DOM via textContent. */
+   MAX_FIELD chars and only ever reaches the DOM via textContent.
+
+   Since ADR-0006 the site publishes WITHOUT human review, so this file stopped
+   being a second opinion after a moderator: it is now the only thing standing
+   between a stranger's form answer and a visitor's screen. That is why links
+   below are an ALLOWLIST of destinations instead of "any http(s) URL" —
+   an unreviewed link is the one field that can send a visitor somewhere
+   harmful, and safeUrl() alone accepts every destination on the web. */
 
 export const MAX_FIELD = 120;   // hard cut per field
 export const MAX_RECORDS = 500; // anti-flood ceiling: visitors' browsers must not pay for a flooded sheet
 
 // Accepts only ABSOLUTE http(s) URLs — blocks "javascript:" and friends, and
 // keeps free text (e.g. "@instagram") from being mistaken for a link.
+// Used for the site's OWN links (js/config.js), which are not community data.
 export function safeUrl(u) {
   if (!u) return "";
   try {
     const p = new URL(String(u)); // no base: relative input throws → ""
     if (p.protocol === "https:" || p.protocol === "http:") return p.href;
   } catch (e) { /* invalid/relative URL → treated as empty */ }
+  return "";
+}
+
+/* ---------- link allowlist (ADR-0006) ----------
+   The owner's rule for what a group may publish as contact: the church's or
+   group's social profile, or a map link for the meeting point. Nothing else.
+   These two lists ARE that rule, written once and enforced in three places —
+   the browser, the ingest and the CI gate. */
+
+/** Social networks a group may point to. */
+export const HOSTS_REDE_SOCIAL = [
+  "instagram.com", "facebook.com", "fb.com", "threads.net",
+  "youtube.com", "youtu.be", "tiktok.com", "twitter.com", "x.com",
+  "strava.com",
+];
+
+/* Map services, split by how much of the host is maps.
+   DEDICADOS serve nothing but maps, so any path on them is fine — and one of
+   them, maps.app.goo.gl, is what the "Compartilhar" button in Google Maps
+   actually produces, so this is the format most people will paste.
+   COM_CAMINHO are hosts that serve the whole Google catalogue; there the URL
+   has to be under /maps or "a Google Maps link" becomes a way to publish any
+   Google-hosted page, a Drive file included. */
+export const HOSTS_MAPA_DEDICADOS = [
+  "maps.google.com", "maps.google.com.br", "maps.app.goo.gl",
+  "openstreetmap.org", "osm.org",
+];
+export const HOSTS_MAPA_COM_CAMINHO = ["google.com", "google.com.br", "goo.gl"];
+export const HOSTS_MAPA = [...HOSTS_MAPA_DEDICADOS, ...HOSTS_MAPA_COM_CAMINHO];
+
+/* Exact host, or a subdomain of it. Written as "===" plus endsWith("." + d) on
+   purpose: a plain endsWith(d) would also accept
+   "instagram.com.exemplo-malicioso.com", which is somebody else's site. */
+function hostPermitido(host, dominios) {
+  return dominios.some((d) => host === d || host.endsWith("." + d));
+}
+
+/** Instagram/TikTok/X handles: letters, digits, dot and underscore. */
+const ARROBA = /^@?([A-Za-z0-9._]{1,40})$/;
+
+function comoUrl(v) {
+  try {
+    const p = new URL(String(v ?? "").trim());
+    if (p.protocol !== "https:" && p.protocol !== "http:") return null;
+    return p;
+  } catch (e) { return null; }
+}
+
+/* The handle shown to the reader: "@nome" when we can derive one, otherwise
+   the bare host. Like every other string, it reaches the DOM via textContent. */
+const COM_ARROBA = ["instagram.com", "tiktok.com", "twitter.com", "x.com", "threads.net"];
+
+function rotuloDe(p) {
+  const primeiro = (p.pathname.split("/").filter(Boolean)[0] || "").replace(/^@/, "");
+  if (hostPermitido(p.hostname, COM_ARROBA) && ARROBA.test(primeiro)) return "@" + primeiro;
+  return p.hostname.replace(/^www\./, "");
+}
+
+/**
+ * Normalizes the public social contact.
+ * Accepts "@handle" (read as Instagram, which is what the form asks for) or a
+ * URL on an allowlisted network. Returns { url, rotulo }, with url === "" when
+ * the value is not an acceptable destination — the group still publishes, it
+ * just publishes without a clickable link. Dropping the link instead of the
+ * record matters now that nobody reviews: one bad answer must not delete a
+ * real group from the map.
+ */
+export function linkRedeSocial(v) {
+  const bruto = String(v ?? "").trim();
+  if (!bruto) return { url: "", rotulo: "" };
+
+  const p = comoUrl(bruto);
+  if (p) {
+    if (!hostPermitido(p.hostname, HOSTS_REDE_SOCIAL)) return { url: "", rotulo: "" };
+    return { url: p.href, rotulo: rotuloDe(p) };
+  }
+
+  // Not a URL: the form asks for "@handle", and a good half of people will type
+  // it without the @. Accepting both is worth more than the tidiness of
+  // requiring one, so the @ is optional here.
+  const m = ARROBA.exec(bruto);
+  if (!m) return { url: "", rotulo: "" };
+  return { url: "https://www.instagram.com/" + m[1], rotulo: "@" + m[1] };
+}
+
+/**
+ * Normalizes the public map link. Returns "" for anything that is not a map —
+ * again dropping the link, never the group.
+ *
+ * The dedicated hosts are checked FIRST because maps.google.com also ends in
+ * ".google.com": testing the broad list first would send it down the /maps
+ * path rule and reject a perfectly good link.
+ */
+export function linkMapa(v) {
+  const p = comoUrl(v);
+  if (!p) return "";
+  if (hostPermitido(p.hostname, HOSTS_MAPA_DEDICADOS)) return p.href;
+  if (hostPermitido(p.hostname, HOSTS_MAPA_COM_CAMINHO) && /^\/maps(\/|$|\?)/.test(p.pathname)) return p.href;
   return "";
 }
 
@@ -31,6 +137,28 @@ export function cleanField(v) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, MAX_FIELD);
+}
+
+/**
+ * "há 8 minutos", "há 3 horas", "há 2 dias" — the freshness seal.
+ *
+ * With publication automatic, a pipeline that quietly stopped working looks
+ * exactly like a week where nobody registered. Relative time is used on purpose
+ * instead of a clock reading: it needs no timezone to be right, and "há 3 dias"
+ * is a sentence a visitor can judge, while "25/08 17:12 UTC" is not.
+ * Returns "" when there is no usable timestamp, and the caller shows nothing.
+ */
+export function descreveIdade(iso, agora = Date.now()) {
+  const t = Date.parse(String(iso ?? ""));
+  if (!Number.isFinite(t)) return "";
+  const min = Math.floor((agora - t) / 60000);
+  if (min < 0) return "";           // clock skew: say nothing rather than "há -2 minutos"
+  if (min < 2) return "agora mesmo";
+  if (min < 60) return `há ${min} minutos`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return h === 1 ? "há 1 hora" : `há ${h} horas`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "há 1 dia" : `há ${d} dias`;
 }
 
 // Rough DF bounding box (sanity check only; real bounds come from the RA GeoJSON).
@@ -54,6 +182,7 @@ export function parseSnapshot(j) {
   for (const r of list.slice(0, MAX_RECORDS)) {
     if (r == null || typeof r !== "object") continue;
     const lat = Number(r.lat), lon = Number(r.lon);
+    const rede = linkRedeSocial(r.rede_social);
     const rec = {
       grupo: cleanField(r.grupo),
       organizacao: cleanField(r.organizacao),
@@ -64,8 +193,13 @@ export function parseSnapshot(j) {
         .slice(0, 7).map(cleanField).filter(Boolean),
       horario: cleanField(r.horario),
       local: cleanField(r.local),
-      contatoTexto: cleanField(r.contato),
-      contatoUrl: safeUrl(r.contato), // "" when the public contact is not a link (e.g. @instagram)
+      custo: cleanField(r.custo),
+      publico: (Array.isArray(r.publico) ? r.publico : [])
+        .slice(0, 6).map(cleanField).filter(Boolean),
+      orientacao_profissional: cleanField(r.orientacao_profissional),
+      redeUrl: rede.url,
+      redeRotulo: cleanField(rede.rotulo),
+      mapaUrl: linkMapa(r.mapa),
       lat: insideDF(lat, lon) ? lat : null,
       lon: insideDF(lat, lon) ? lon : null,
     };

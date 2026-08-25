@@ -2,14 +2,22 @@
  * movimenta7 — snapshot publication gate (D5/ADR-0004).
  *
  * Fails the build (exit 1) when data/snapshot.json carries anything that must
- * not be public. Three layers, in order of strength:
+ * not be public. Four layers, in order of strength:
  *   1. ALLOWLIST — a key outside CAMPOS_PUBLICOS is refused, whatever it is
  *      called. This is the primary control. publicar_snapshot.mjs enforced it
  *      already; this gate did not, so a hand-edited snapshot bypassed it.
  *   2. DENYLIST — the explicitly private key names, kept as a second layer so
  *      that widening the allowlist by accident still fails loudly.
  *   3. VALUE checks — phone, e-mail, CPF/CNPJ (mod-11) and links outside the
- *      contact field. Until now nothing looked at values except PHONE_LIKE.
+ *      two link fields. Until now nothing looked at values except PHONE_LIKE.
+ *   4. LINK DESTINATIONS — rede_social and mapa must point at a host on the
+ *      allowlist in js/util.js. Since ADR-0006 nobody reads a submission before
+ *      it goes live, so the destination of a link is checked by a list rather
+ *      than by a person.
+ *
+ * This gate stays fail-closed even though the ingest quarantines bad rows one
+ * by one: by the time data reaches this file it has already been through our
+ * own code, so a hit here is a bug of ours, not a stranger's bad answer.
  *
  * Run: node scripts/valida_snapshot.mjs
  */

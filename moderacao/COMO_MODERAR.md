@@ -1,62 +1,76 @@
-# Como colocar um cadastro no mapa (moderação)
+# Como o mapa decide o que publica
 
-Cadastro aprovado **não aparece sozinho** no site. Isso é de propósito: é a trava que
-impede dado pessoal de vazar (ADR-0002 / ADR-0004). Um humano decide o que vira público.
+Desde 25/08/2026 (ADR-0006) **não existe fila de aprovação**: quem preenche o formulário
+entra no mapa sozinho, em cerca de 10 minutos. Este arquivo explica o que passa, o que não
+passa, e o que você faz quando precisa tirar algo do ar.
+
+> A versão anterior deste guia ensinava a copiar campo a campo para
+> `moderacao/aprovados.json`. **Esse caminho não existe mais.** Quem escreve esse arquivo
+> é `scripts/ingerir_csv.mjs`, a partir da planilha.
 
 ## O caminho de um cadastro
 
-1. A pessoa preenche o **Google Form**.
-2. A resposta cai na **planilha privada** — que fica só com a moderação e **nunca** entra
-   neste repositório.
-3. Você lê a resposta e decide se aprova.
-4. Você copia **só os campos públicos** para `moderacao/aprovados.json`.
-5. Roda `node scripts/publicar_snapshot.mjs` — ele gera o `data/snapshot.json`.
-6. `git add -A && git commit -m "publica cadastros aprovados" && git push` — em cerca de
-   1 minuto o pin está no ar.
+1. A pessoa preenche o **Google Form** — que **não pede nenhum dado pessoal**.
+2. A resposta cai na planilha, e a aba **PUBLICAR** mostra só as colunas públicas.
+3. A cada ~10 minutos o GitHub lê essa aba e roda as checagens automáticas.
+4. O que passa vira pin. O que não passa fica de fora, com o motivo escrito no log.
 
-**O passo 4 é manual de propósito.** É ele que garante que o nome e o WhatsApp pessoal de
-quem se cadastrou nunca saiam da planilha. Não automatize.
+## O que a checagem automática recusa
 
-## O que copiar (e o que NUNCA copiar)
+Um cadastro **não entra** (e só ele; o resto do mapa continua normal) quando algum campo tem:
 
-| Vai para o site | Fica só na planilha |
+| O quê | Como é detectado |
 |---|---|
-| nome do grupo, igreja/organização | seu nome pessoal |
-| região, modalidades, dias, horário | seu WhatsApp pessoal |
-| local público de encontro | qualquer dado de contato privado |
-| o contato que a pessoa marcou como **público** | |
+| telefone | qualquer formato brasileiro, inclusive dentro de link |
+| e-mail | padrão `alguem@algumlugar.com` |
+| CPF ou CNPJ | **dígito verificador conferido** — quase nunca dá alarme falso |
+| link em campo que não é de link | uma URL escondida no nome do grupo, no local etc. |
+| região que o mapa não conhece | comparada com `data/regioes.json` |
+| cadastro sem nome de grupo ou sem região | não dá para desenhar |
+| cadastro repetido | mesmo grupo + região + local entram uma vez só |
 
-## Formato do arquivo
+E **o link recusado custa só o link**: se o endereço da rede social ou do mapa não estiver
+na lista de destinos aceitos, o grupo entra no mapa assim mesmo, sem o botão.
 
-```json
-[
-  {
-    "grupo": "Corredores da IASD Águas Claras",
-    "organizacao": "IASD Águas Claras",
-    "regiao": "Águas Claras",
-    "modalidades": ["Corrida", "Caminhada"],
-    "dias": ["Domingo", "Quarta"],
-    "horario": "06h30",
-    "local": "Parque Ecológico de Águas Claras, portão principal",
-    "contato": "https://chat.whatsapp.com/EXEMPLO"
-  }
-]
-```
+### Os destinos aceitos nos dois campos de link
 
-- `regiao` precisa bater com o nome oficial da região administrativa (acento e maiúscula
-  não importam). Se não bater, o grupo ainda conta no contador, mas fica **sem pin** — o
-  script avisa na tela.
-- `contato` vira link clicável só se começar com `https://`. Um `@instagram` aparece como
-  texto.
-- Não precisa informar `lat`/`lon`: o script coloca o grupo no centro da região sozinho,
-  usando o mapa oficial do IPEDF. Vários grupos na mesma região ficam lado a lado.
+- **rede social:** Instagram, Facebook, Threads, YouTube, TikTok, Twitter/X, Strava
+  (ou só o `@` — vira Instagram)
+- **mapa:** `maps.app.goo.gl`, `maps.google.com`, `google.com/maps`, `goo.gl/maps`,
+  OpenStreetMap
+
+Fora disso, não vira link. **WhatsApp saiu da lista de propósito** — o número de telefone
+fica dentro da própria URL (`wa.me/5561...`), então publicá-lo seria publicar o telefone.
+
+## O que você faz (e só quando precisar)
+
+**Tirar um grupo do ar:** marque a caixinha `remover` na linha dele, na planilha. Sai na
+rodada seguinte, em até ~10 minutos. É o mesmo caminho para pedido de remoção que chegou
+pelo formulário, para cadastro falso e para grupo que acabou.
+
+Não existe passo "aprovar". Não existe `git push` para publicar cadastro.
+
+## O que é público
+
+Tudo o que o formulário pergunta na página de cadastro:
+
+nome do grupo · igreja/organização · região · modalidades · dias · horário · local público
+de encontro · custo · para quem é aberto · se há profissional de educação física
+acompanhando · @ da rede social · link do mapa
+
+**Nada além disso é coletado.** Não há nome de pessoa, telefone nem e-mail na planilha —
+e o que não é coletado não pode vazar.
 
 ## Se der erro
 
-O script **recusa publicar** e explica o motivo, sem gravar nada. Os dois motivos comuns:
+Os erros aparecem no log do GitHub (Actions > **ci e publicacao**), em português. Eles têm
+duas gravidades bem diferentes:
 
-- `campo privado "telefone"` — você copiou um campo que não pode ir para o site. Apague-o.
-- `campo desconhecido "X"` — só os campos da tabela acima entram.
+- **`AVISO: linha N ...`** — um cadastro ficou de fora. O site publicou o resto normalmente.
+  A mensagem diz a linha e o campo, e **nunca** o conteúdo (o log é público).
+- **`INGESTAO ABORTADA` / `PUBLICACAO ABORTADA` / `SNAPSHOT REPROVADO`** — nada foi
+  publicado e **o site anterior continua no ar, intacto**. É sinal de planilha errada
+  publicada ou de bug no código, não de um cadastro ruim.
 
-Depois de publicar, confira com `node scripts/valida_snapshot.mjs`. O mesmo teste roda no
-CI: se passar dado privado, o site **não sobe**.
+Para conferir na sua máquina: `node scripts/valida_snapshot.mjs`. O mesmo teste roda no CI,
+e gate vermelho **não sobe** (`needs: qa` em `.github/workflows/ci.yml`).

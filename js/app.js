@@ -1,20 +1,21 @@
 /* ============================================================
    movimenta7 — landing (Fase 0)
    Vanilla JS. Flow:
-   1) wire CTAs from js/config.js (form + WhatsApp), with safe fallbacks
-   2) load data/snapshot.json (starts empty) → counter + map pins
+   1) wire CTAs from js/config.js (form), with safe fallbacks
+   2) load data/snapshot.json → counter + freshness seal + map pins
    3) Leaflet is loaded ON DEMAND (facade pattern) with SRI hashes —
       it is the page's biggest third-party script (ADR-0003)
    Security (ADR-0004): data-borne text reaches the DOM ONLY via
-   textContent; URLs pass through safeUrl(). Do not relax this.
+   textContent; community links pass through the host allowlist in
+   util.js, never through safeUrl(). Do not relax this — since
+   ADR-0006 no human reads a submission before it is drawn here.
    ============================================================ */
 
-import { safeUrl, parseSnapshot } from "./util.js";
+import { safeUrl, parseSnapshot, descreveIdade } from "./util.js";
 
 const CFG = window.MOV7_CONFIG || {};
 const URLS = {
   form: safeUrl(CFG.FORM_URL),
-  whatsapp: safeUrl(CFG.WHATSAPP_URL),
   repo: safeUrl(CFG.REPO_URL),
 };
 
@@ -69,19 +70,17 @@ function wireCtas() {
   const barraFixa = $("#cta-fixo");
   if (barraFixa && URLS.form) barraFixa.classList.remove("oculto");
 
-  const zap = $("#botao-whatsapp");
-  const zapRodape = $("#link-remocao-wa");
-  if (URLS.whatsapp) {
-    if (zap) { zap.href = URLS.whatsapp; zap.classList.remove("oculto"); }
-    if (zapRodape) zapRodape.href = URLS.whatsapp;
-  } else {
-    const avisoZap = $("#aviso-whatsapp");
-    if (avisoZap) avisoZap.classList.remove("oculto");
-    if (zapRodape) {
-      // no link yet: keep the sentence but drop the dead anchor
-      const txt = document.createTextNode(zapRodape.textContent);
-      zapRodape.replaceWith(txt);
-    }
+  // Correction, removal and "this entry is wrong" all route to the registration
+  // form itself, which asks up front which of the three it is. One channel is
+  // enough and it is the only one that exists now that there is no WhatsApp.
+  // Each anchor must survive an empty FORM_URL, so it is replaced by its own
+  // text rather than left pointing at "#" — a dead link on the sentence that
+  // promises a way to be removed is worse than no link at all.
+  for (const sel of ["#link-remocao", "#link-denuncia"]) {
+    const a = $(sel);
+    if (!a) continue;
+    if (URLS.form) a.href = URLS.form;
+    else a.replaceWith(document.createTextNode(a.textContent));
   }
 
   const repo = $("#link-repo");
@@ -91,17 +90,34 @@ function wireCtas() {
 // ---------- data ----------
 
 let RECORDS = [];
+let ATUALIZADO_EM = "";
 
 async function loadSnapshot() {
   try {
     const resp = await fetch("data/snapshot.json", { cache: "no-store" });
     if (!resp.ok) throw new Error("snapshot " + resp.status);
-    RECORDS = parseSnapshot(await resp.json());
+    const bruto = await resp.json();
+    ATUALIZADO_EM = (bruto && bruto.atualizado_em) || "";
+    RECORDS = parseSnapshot(bruto);
   } catch (e) {
     console.warn("Snapshot indisponível — seguindo com zero registros.", e);
     RECORDS = [];
+    ATUALIZADO_EM = "";
   }
   updateCounter();
+  updateSelo();
+}
+
+/* Freshness seal. Nobody approves entries any more, so a pipeline that broke
+   on Tuesday looks exactly like a quiet week — unless the page says when it
+   last refreshed. */
+function updateSelo() {
+  const el = $("#atualizado");
+  if (!el) return;
+  const idade = descreveIdade(ATUALIZADO_EM);
+  if (!idade) { el.classList.add("oculto"); return; }
+  el.textContent = "Lista atualizada " + idade + ". Cadastros novos entram sozinhos, a cada ~10 minutos.";
+  el.classList.remove("oculto");
 }
 
 function updateCounter() {
@@ -195,6 +211,8 @@ function popupFor(rec) {
     [rec.modalidades.join(", "), rec.dias.join(", "), rec.horario].filter(Boolean).join(" · "),
     rec.local,
     rec.organizacao,
+    [rec.custo, rec.orientacao_profissional].filter(Boolean).join(" · "),
+    rec.publico.join(" · "),
   ];
   for (const l of linhas) {
     if (!l) continue;
@@ -202,21 +220,26 @@ function popupFor(rec) {
     p.textContent = l;
     box.appendChild(p);
   }
-  if (rec.contatoUrl) {
+
+  /* Both destinations already passed the host allowlist in util.js, so the only
+     thing left to decide here is the rel. noopener: the destination cannot
+     reach back into this tab. noreferrer: it does not learn which page sent the
+     visitor. nofollow: a link nobody reviewed never lends us our ranking. */
+  const links = document.createElement("div");
+  links.className = "popup-links";
+  const anexar = (url, texto) => {
+    if (!url) return;
     const a = document.createElement("a");
-    a.href = rec.contatoUrl;
+    a.href = url;
     a.target = "_blank";
-    // noopener: the destination cannot reach back into this tab.
-    // noreferrer: it does not learn which page sent the visitor.
-    // nofollow: a link submitted by the community never lends us our ranking.
     a.rel = "noopener noreferrer nofollow";
-    a.textContent = "Contato do grupo →";
-    box.appendChild(a);
-  } else if (rec.contatoTexto) {
-    const p = document.createElement("div");
-    p.textContent = "Contato: " + rec.contatoTexto;
-    box.appendChild(p);
-  }
+    a.textContent = texto;
+    links.appendChild(a);
+  };
+  anexar(rec.redeUrl, rec.redeRotulo || "Rede social do grupo");
+  anexar(rec.mapaUrl, "Ver o local no mapa →");
+  if (links.childElementCount) box.appendChild(links);
+
   return box;
 }
 

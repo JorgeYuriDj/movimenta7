@@ -4,16 +4,17 @@
 
    Como preencher (Jorge):
    1. FORM_URL — link público do Google Form ("PUBLICAR ESTE" no
-      log do scripts/criar_form.gs).
-   2. WHATSAPP_URL — WhatsApp da moderação:
-      https://wa.me/55DDDNUMERO?text=Ola!%20Vi%20o%20movimenta7
-      (número só dígitos, com 55 + DDD) — ou link de grupo
-      chat.whatsapp.com/... gerado dentro do app.
+      log do scripts/criar_form.gs). É o mesmo link usado para
+      cadastrar E para pedir correção/remoção.
    Deixe "" (vazio) enquanto não tiver — o site mostra um aviso
    no lugar do botão.
+
+   WHATSAPP_URL saiu daqui em 25/08/2026 (ADR-0006): o projeto
+   deixou de ter canal por telefone. Quem precisa falar com um
+   grupo usa a rede social ou o mapa do próprio grupo; quem
+   precisa falar com o movimenta7 usa o formulário.
    ============================================================ */
 window.MOV7_CONFIG = {
   FORM_URL: "https://docs.google.com/forms/d/e/1FAIpQLSfb07atFzG4a_TfTIp8LINg6hNb0A5QtIu06HyRiu6W2KSfZw/viewform",
-  WHATSAPP_URL: "",
   REPO_URL: "https://github.com/JorgeYuriDj/movimenta7",
 };

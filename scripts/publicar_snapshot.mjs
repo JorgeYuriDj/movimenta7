@@ -1,12 +1,19 @@
 /**
- * movimenta7 — moderation step of the Write-Audit-Publish pipeline (ADR-0002).
+ * movimenta7 — publication step of the Write-Audit-Publish pipeline (ADR-0002).
  *
- * Reads moderacao/aprovados.json (PUBLIC fields only, curated by the human
- * moderator) and writes data/snapshot.json, which is what the site reads.
+ * Reads moderacao/aprovados.json (PUBLIC fields only, produced by
+ * ingerir_csv.mjs) and writes data/snapshot.json, which is what the site reads.
  *
- * The private response spreadsheet is NEVER an input here: the moderator
- * copies only the public fields across by hand. That manual gap IS the
- * privacy control (ADR-0004) — do not automate it away.
+ * This file used to say that the manual copy step WAS the privacy control and
+ * must never be automated. ADR-0006 replaced that control rather than deleting
+ * it: the form stopped collecting personal data at all, so there is no longer a
+ * private column for a human to leave behind. What a human used to do by being
+ * careful, the pipeline now does by not having the data.
+ *
+ * Still fail-closed, and that is deliberate ASYMMETRY with the ingest: the
+ * ingest quarantines one bad row and carries on, because its input is the open
+ * public. This step's input is a file our own ingest just wrote, so anything
+ * wrong here is a bug in us and deserves a red build.
  *
  * Coordinates: the form does not ask for them, so a group is placed at the
  * centroid of its administrative region, taken from the official IPEDF layer
@@ -138,11 +145,21 @@ aprovados.forEach((r, i) => {
   if (!r.grupo) { erros.push(`${rotulo}: falta "grupo" (sem nome do grupo o site nao mostra)`); return; }
   if (!r.regiao) { erros.push(`${rotulo}: falta "regiao"`); return; }
 
+  // Every public field is carried through. custo, publico and
+  // orientacao_profissional used to be collected, validated — and then dropped
+  // right here, so the form asked three questions whose answers no visitor ever
+  // saw. They are the answers to "posso levar meu filho?", "é pago?" and "tem
+  // profissional?", which is exactly what someone deciding whether to show up
+  // wants to know.
   const rec = {
     grupo: r.grupo, organizacao: r.organizacao || "", regiao: r.regiao,
     modalidades: Array.isArray(r.modalidades) ? r.modalidades : [],
     dias: Array.isArray(r.dias) ? r.dias : [],
-    horario: r.horario || "", local: r.local || "", contato: r.contato || "",
+    horario: r.horario || "", local: r.local || "",
+    custo: r.custo || "",
+    publico: Array.isArray(r.publico) ? r.publico : [],
+    orientacao_profissional: r.orientacao_profissional || "",
+    rede_social: r.rede_social || "", mapa: r.mapa || "",
   };
 
   if (Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))) {
@@ -178,7 +195,10 @@ aprovados.forEach((r, i) => {
 
 if (erros.length) fail("\n- " + erros.join("\n- "));
 
-const doc = { atualizado_em: new Date().toISOString().slice(0, 10), registros };
+// Full timestamp, not just the date. With nobody approving each entry, "when
+// did this last refresh?" is the only way the owner can tell a working pipeline
+// from one that has been quietly failing since Tuesday — and the page shows it.
+const doc = { atualizado_em: new Date().toISOString(), registros };
 writeFileSync(OUT, JSON.stringify(doc, null, 2) + "\n", { encoding: "utf-8" });
 
 semCoordenada.forEach((a) => console.warn("AVISO: " + a));

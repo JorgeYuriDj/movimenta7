@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { safeUrl, cleanField, parseSnapshot, MAX_FIELD, MAX_RECORDS } from "../js/util.js";
+import {
+  safeUrl, cleanField, parseSnapshot, descreveIdade,
+  linkRedeSocial, linkMapa, MAX_FIELD, MAX_RECORDS,
+} from "../js/util.js";
 
 test("safeUrl accepts http(s) only", () => {
   assert.equal(safeUrl("https://wa.me/5561999990000"), "https://wa.me/5561999990000");
@@ -42,12 +45,82 @@ test("parseSnapshot rejects coordinates outside the DF box", () => {
   assert.equal(ok.lat, -15.79);
 });
 
-test("parseSnapshot keeps public contact as link only when http(s)", () => {
-  const [a] = parseSnapshot([{ grupo: "G", contato: "https://chat.whatsapp.com/abc" }]);
-  assert.equal(a.contatoUrl, "https://chat.whatsapp.com/abc");
-  const [b] = parseSnapshot([{ grupo: "G", contato: "@corrida_df" }]);
-  assert.equal(b.contatoUrl, "");
-  assert.equal(b.contatoTexto, "@corrida_df");
+/* ---------- link allowlist (ADR-0006) ----------
+   safeUrl() accepts every destination on the web, which was fine while a human
+   read each entry first. Nobody does any more, so these two decide where a
+   community-submitted link is allowed to point. */
+
+test("linkRedeSocial accepts a handle, with or without the @", () => {
+  assert.deepEqual(linkRedeSocial("@corrida_df"),
+    { url: "https://www.instagram.com/corrida_df", rotulo: "@corrida_df" });
+  // Half the people will forget the @; dropping their link over punctuation
+  // would be a worse outcome than assuming Instagram, which is what we asked for.
+  assert.deepEqual(linkRedeSocial("corrida_df"),
+    { url: "https://www.instagram.com/corrida_df", rotulo: "@corrida_df" });
+});
+
+test("linkRedeSocial accepts allowlisted networks and derives a readable label", () => {
+  assert.deepEqual(linkRedeSocial("https://www.instagram.com/iasd.central/"),
+    { url: "https://www.instagram.com/iasd.central/", rotulo: "@iasd.central" });
+  assert.equal(linkRedeSocial("https://facebook.com/iasd").url, "https://facebook.com/iasd");
+  assert.equal(linkRedeSocial("https://www.strava.com/clubs/123").url, "https://www.strava.com/clubs/123");
+});
+
+test("linkRedeSocial refuses everything outside the allowlist", () => {
+  assert.equal(linkRedeSocial("https://malware.example/x").url, "");
+  assert.equal(linkRedeSocial("javascript:alert(1)").url, "");
+  // WhatsApp is not on the list at all now — the owner removed the channel.
+  assert.equal(linkRedeSocial("https://chat.whatsapp.com/abc").url, "");
+  // The important one: a lookalike host is a different site. endsWith("instagram.com")
+  // would have accepted this and sent visitors to somebody else's server.
+  assert.equal(linkRedeSocial("https://instagram.com.exemplo-malicioso.com/x").url, "");
+});
+
+test("linkMapa accepts the format the Google Maps share button produces", () => {
+  // This is what "Compartilhar" gives you on a phone, so it is the format most
+  // people will paste. An earlier version of this rule rejected it.
+  assert.equal(linkMapa("https://maps.app.goo.gl/abc123"), "https://maps.app.goo.gl/abc123");
+  assert.equal(linkMapa("https://maps.google.com/?q=Parque"), "https://maps.google.com/?q=Parque");
+  assert.equal(linkMapa("https://goo.gl/maps/xyz"), "https://goo.gl/maps/xyz");
+  assert.equal(linkMapa("https://www.openstreetmap.org/#map=15"), "https://www.openstreetmap.org/#map=15");
+});
+
+test("linkMapa refuses Google pages that are not maps", () => {
+  // google.com hosts the whole catalogue; without the /maps rule "a maps link"
+  // would be a way to publish a Drive file or a search results page.
+  assert.equal(linkMapa("https://www.google.com/maps/place/Parque"), "https://www.google.com/maps/place/Parque");
+  assert.equal(linkMapa("https://www.google.com/search?q=x"), "");
+  assert.equal(linkMapa("https://drive.google.com/file/d/1"), "");
+  assert.equal(linkMapa("https://goo.gl/xyz"), "");
+  assert.equal(linkMapa("https://maps.app.goo.gl.exemplo-malicioso.com/a"), "");
+});
+
+test("parseSnapshot exposes the two links and never the raw text", () => {
+  const [a] = parseSnapshot([{ grupo: "G", rede_social: "@corrida_df", mapa: "https://maps.app.goo.gl/x" }]);
+  assert.equal(a.redeUrl, "https://www.instagram.com/corrida_df");
+  assert.equal(a.redeRotulo, "@corrida_df");
+  assert.equal(a.mapaUrl, "https://maps.app.goo.gl/x");
+
+  // A refused destination costs the group its link, never its pin.
+  const [b] = parseSnapshot([{ grupo: "G", rede_social: "https://malware.example", mapa: "nada" }]);
+  assert.equal(b.grupo, "G");
+  assert.equal(b.redeUrl, "");
+  assert.equal(b.redeRotulo, "");
+  assert.equal(b.mapaUrl, "");
+});
+
+test("descreveIdade says how stale the list is, in words a visitor can judge", () => {
+  const agora = Date.parse("2026-08-25T12:00:00Z");
+  const atras = (min) => new Date(agora - min * 60000).toISOString();
+  assert.equal(descreveIdade(atras(0), agora), "agora mesmo");
+  assert.equal(descreveIdade(atras(12), agora), "há 12 minutos");
+  assert.equal(descreveIdade(atras(60), agora), "há 1 hora");
+  assert.equal(descreveIdade(atras(60 * 5), agora), "há 5 horas");
+  assert.equal(descreveIdade(atras(60 * 24 * 3), agora), "há 3 dias");
+  assert.equal(descreveIdade("", agora), "");
+  assert.equal(descreveIdade("nao e data", agora), "");
+  // Clock skew must not produce "há -2 minutos"; saying nothing is correct.
+  assert.equal(descreveIdade(atras(-2), agora), "");
 });
 
 test("parseSnapshot caps the number of records (anti-flood)", () => {

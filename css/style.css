@@ -154,7 +154,7 @@ a, button { transition: background-color 180ms ease-out, border-color 180ms ease
 }
 .hero-sub { color: var(--text-2); font-size: 18px; max-width: 600px; margin: 0 auto 24px; }
 .hero-acoes { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; align-items: center; }
-.aviso-form, .aviso-whatsapp { color: var(--text-3); font-size: 14px; width: 100%; }
+.aviso-form { color: var(--text-3); font-size: 14px; width: 100%; }
 
 /* ---------- bullets de valor ---------- */
 
@@ -209,6 +209,10 @@ h2 {
   font-weight: 600; box-shadow: var(--sombra);
 }
 .contador { margin-top: 12px; color: var(--text-2); font-weight: 600; }
+/* Selo de atualidade: com publicacao automatica, a unica forma de o visitante
+   distinguir "semana parada" de "pipeline quebrada" e a pagina dizer quando
+   a lista atualizou. */
+.atualizado { margin-top: 6px; font-size: 13px; color: var(--text-3); }
 .fonte-dados { margin-top: 8px; font-size: 13px; color: var(--text-3); }
 
 /* popup do Leaflet segue o tema */
@@ -226,6 +230,9 @@ h2 {
 }
 .popup-grupo > * { min-width: 0; }
 .popup-grupo a { color: var(--brand); font-weight: 600; }
+/* A group may publish a social profile AND a map link; they sit side by side
+   and wrap instead of stretching the balloon past the phone screen. */
+.popup-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
 
 /* ---------- como funciona ---------- */
 

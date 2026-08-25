@@ -1,32 +1,44 @@
 # movimenta7 — regras do projeto
 
 **O que é:** rede de atividades físicas da comunidade adventista do DF, aberta a todos.
-Site estático (vanilla JS, GitHub Pages) + Leaflet + pipeline Forms→moderação→JSON público.
+Site estático (vanilla JS, GitHub Pages) + Leaflet + pipeline Forms→checagem automática→JSON público.
 Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorge Yuri (leigo).
 
 ## Regras não negociáveis
 1. **`textContent` sempre, `innerHTML` nunca** — todo dado da comunidade é hostil até prova
    contrária (SECURITY_BASELINE.md:33). Vale para popups do Leaflet.
-2. **A planilha privada NUNCA entra no repo nem vira pública.** Público só passa pelo pipeline
+2. **O formulário NÃO coleta dado pessoal** (ADR-0006, 25/08/2026): nem nome, nem telefone,
+   nem e-mail, nem CREF. O que não é coletado não vaza. Público só passa pelo pipeline
    Write-Audit-Publish (ADR-0002). O controle primário é **allowlist** (`CAMPOS_PUBLICOS` em
    `scripts/denylist.mjs`) — campo fora dela reprova, tenha o nome que tiver; a denylist ficou
    como 2ª camada. Valores também são checados: telefone, e-mail, CPF/CNPJ (mod-11) e link fora
-   do campo de contato.
+   dos dois campos de link. **Link só para host na allowlist** (`HOSTS_REDE_SOCIAL` /
+   `HOSTS_MAPA` em `js/util.js`) — `safeUrl()` aceita a web inteira e não serve mais para dado
+   da comunidade.
    ⚠️ **Nenhum cadastro é publicado editando `moderacao/aprovados.json` à mão** — repo público
    tem histórico permanente e isso conflita com o direito de exclusão (ADR-0005, decisão 1).
    O caminho é a planilha → `scripts/ingerir_csv.mjs`.
-3. **Nenhum dado de menor de idade** (ADR-0004). Aviso de privacidade sempre visível.
-4. Deploy via `git push` (Pages). **Rollback = `git revert HEAD && git push`** — 1 comando.
-5. CI verde obrigatório: testes + gates (exit ≠ 0 = não sobe). ✅ **Lacuna FECHADA em
+3. **Publicação é AUTOMÁTICA** (ADR-0006): não há fila de aprovação; cron de 10 min publica
+   quem preencheu o formulário. Daí a assimetria que **não pode ser "consertada"**: erro
+   estrutural (coluna inesperada, CSV vazio) **aborta tudo**; erro de um cadastro (dado pessoal,
+   região inválida, link fora da lista) **pula só aquele e segue**. Fail-closed por registro
+   entregaria a qualquer pessoa o poder de congelar o site preenchendo o formulário com lixo.
+   `publicar_snapshot.mjs` e `valida_snapshot.mjs` seguem fail-closed de propósito — a entrada
+   deles é arquivo nosso, então erro ali é bug nosso.
+4. **Nenhum dado de menor de idade** (ADR-0004). Aviso de privacidade sempre visível.
+   ⚠️ O site **descreve o próprio funcionamento por escrito** em `index.html`. Se o desenho
+   mudar, o texto muda no MESMO commit — nunca calado.
+5. Deploy via `git push` (Pages). **Rollback = `git revert HEAD && git push`** — 1 comando.
+6. CI verde obrigatório: testes + gates (exit ≠ 0 = não sobe). ✅ **Lacuna FECHADA em
    24/08/2026:** o Pages saiu do modo `legacy` e passou a publicar por `actions/deploy-pages`,
    com o job `deploy` declarando `needs: qa`. Verificado de verdade na branch `prova/gate-vermelho`
    (run 32766185945): gate vermelho → `deploy` **skipped**, site anterior intacto no ar.
    O que sobe é só o que a página carrega (`index.html`, `css/`, `js/`, `data/`, `assets/`) —
    `scripts/`, `tests/`, `docs/` e `moderacao/` deixaram de ser servidos.
-6. Idiomas: **código e prompts em inglês; tudo que o dono lê em português.** Pesquisa web em
+7. Idiomas: **código e prompts em inglês; tudo que o dono lê em português.** Pesquisa web em
    inglês, saída em português.
-7. Números públicos sempre REAIS — nunca inflar (regra do dono).
-8. Encoding: `open(path, "w", encoding="utf-8")` em qualquer script Python; UTF-8 em tudo.
+8. Números públicos sempre REAIS — nunca inflar (regra do dono).
+9. Encoding: `open(path, "w", encoding="utf-8")` em qualquer script Python; UTF-8 em tudo.
 
 ## Revisão externa (Codex)
 Ciclo em marcos (fim Fase 1, fim Fase 2, antes da Fase 3): `_revisao_codex/PROMPT_ANALISE_SISTEMA.md`.

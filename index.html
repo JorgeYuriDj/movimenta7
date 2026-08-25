@@ -57,8 +57,7 @@
       <div class="hero-acoes">
         <a id="cta-hero" class="botao botao-primario oculto" href="#" target="_blank" rel="noopener">Cadastre sua atividade →</a>
         <p id="aviso-form" class="aviso-form">O link de cadastro entra no ar ainda hoje — volte em instantes.</p>
-        <a id="botao-whatsapp" class="botao botao-secundario oculto" href="#" target="_blank" rel="noopener">Falar no WhatsApp</a>
-        <p id="aviso-whatsapp" class="aviso-whatsapp oculto">O WhatsApp da moderação entra no ar junto com o cadastro.</p>
+        <a class="botao botao-secundario" href="#secao-mapa">Ver o mapa</a>
       </div>
     </section>
 
@@ -84,34 +83,46 @@
     <!-- MAPA -->
     <section id="secao-mapa" class="secao" aria-labelledby="titulo-mapa">
       <h2 id="titulo-mapa">O mapa do movimento</h2>
-      <p class="secao-sub">Cada pin é um grupo real, com dia, horário e contato. Toque num pin para conhecer o grupo.</p>
+      <p class="secao-sub">Cada pin é um grupo real, com dia, horário e local. Toque num pin para
+        conhecer o grupo e falar com ele pela rede social da igreja.</p>
       <figure class="mapa-figura">
         <div id="mapa" class="mapa" aria-label="Mapa do Distrito Federal com os grupos de atividade física"></div>
         <p id="mapa-status" class="mapa-status">Carregando o mapa…</p>
         <div id="faixa-nascendo" class="faixa-nascendo">🌱 O mapa está nascendo — cadastre seu grupo e seja o primeiro pin da sua região.</div>
       </figure>
       <p id="contador" class="contador" aria-live="polite"></p>
+      <p id="atualizado" class="atualizado oculto" aria-live="polite"></p>
       <p class="fonte-dados">Limites das regiões administrativas: IPEDF / SEDUH-GDF (camada Limite_RA_2019).
-        Só entram no mapa cadastros aprovados pela moderação.</p>
+        Cada grupo é responsável pelas informações que cadastrou. Viu algo errado ou fora do lugar?
+        <a id="link-denuncia" href="#" rel="noopener">Avise a organização</a> e nós tiramos do ar.</p>
     </section>
 
     <!-- COMO FUNCIONA -->
     <section id="como-funciona" class="secao" aria-labelledby="titulo-como">
       <h2 id="titulo-como">Como funciona</h2>
       <ol class="passos">
-        <li><strong>Cadastre a atividade do seu grupo</strong> — leva uns 3 minutos: modalidade, região,
-          dia, horário, local público de encontro e o contato do grupo.</li>
-        <li><strong>A moderação revisa.</strong> Nada entra no site sem revisão humana — e dados
-          pessoais (seu nome e telefone) nunca viram públicos.</li>
-        <li><strong>Seu grupo aparece no mapa</strong> — e quem está por perto encontra vocês.</li>
+        <li><strong>Cadastre a atividade do seu grupo</strong> — leva uns 2 minutos: modalidade, região,
+          dia, horário, local público de encontro e o @ da rede social da igreja ou o link do
+          Google Maps do lugar.</li>
+        <li><strong>Seu grupo entra no mapa sozinho</strong>, em cerca de 10 minutos. Não há fila de
+          aprovação: uma checagem automática confere que nenhum dado pessoal e nenhum link
+          estranho passem, e é só isso que separa o cadastro do mapa.</li>
+        <li><strong>Quem está por perto encontra vocês</strong> — e fala com o grupo pela rede social
+          que vocês indicaram, ou aparece no local.</li>
       </ol>
       <p class="aviso-privacidade"><strong>Privacidade (LGPD):</strong> o movimenta7 é uma iniciativa
-        comunitária independente. Coletamos os dados do cadastro só para organizar e divulgar as
-        atividades. Vira público no site apenas: nome do grupo, igreja/organização, modalidade,
-        região, dia, horário, local público e o contato que você indicar como público. Seu nome e
-        telefone pessoais ficam privados com a moderação. Não coletamos dados de menores de idade.
-        Para corrigir ou remover seu cadastro, <a id="link-remocao-wa" href="#" rel="noopener">fale com a
-        moderação pelo WhatsApp</a>. Base legal: consentimento (art. 7º, I da LGPD). Regime de agente
+        comunitária independente. <strong>Não pedimos nenhum dado pessoal</strong> — nem nome, nem
+        telefone, nem e-mail. O cadastro é sobre a atividade e sobre a igreja/organização, e tudo o
+        que você preenche é público no mapa: nome do grupo, organização, modalidade, região, dia,
+        horário, local público de encontro, custo, para quem é aberto, se há profissional de
+        educação física acompanhando, e o perfil de rede social ou o link de mapa do local.
+        <strong>Não publique o telefone, o endereço de casa nem o nome de ninguém</strong> — a
+        checagem automática recusa cadastros com esses dados, e um cadastro recusado simplesmente
+        não aparece. Não coletamos dados de menores de idade. Como não há fila de aprovação, o
+        conteúdo é de responsabilidade de quem cadastrou.
+        Para corrigir ou remover um cadastro, <a id="link-remocao" href="#" rel="noopener">use o mesmo
+        formulário e escolha "corrigir ou remover"</a> — sai do mapa em até 24 horas.
+        Base legal: consentimento (art. 7º, I da LGPD). Regime de agente
         de pequeno porte — Res. CD/ANPD nº 2/2022.</p>
     </section>
   </main>

@@ -16,6 +16,20 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # A publicação é automática desde ADR-0006: ninguém aprova cadastro a cadastro,
+  # então alguém precisa ir à planilha de tempos em tempos — é este cron. Sem ele
+  # o site só atualizaria quando houvesse um push, e um formulário preenchido no
+  # domingo esperaria o próximo commit para virar pin.
+  #
+  # ~10 min é o piso útil: a URL publicada do Google tem cache de ~5 min (que
+  # ingerir_csv.mjs ainda fura com um parâmetro variável), e o GitHub atrasa cron
+  # em horário de pico. Na prática o cadastro aparece em 5 a 15 minutos.
+  #
+  # ⚠️ O GitHub DESLIGA workflows agendados após 60 dias sem nenhuma atividade no
+  # repositório. Se um dia o mapa parar de atualizar sozinho, é o primeiro lugar
+  # a olhar: Actions > ci e publicacao > "Enable workflow".
+  schedule:
+    - cron: "*/10 * * * *"
 
 # Least privilege by default; the deploy job widens it for itself only.
 permissions:
@@ -43,7 +57,9 @@ jobs:
 
       # Enquanto a variavel PLANILHA_CSV_URL nao existir, este passo avisa e
       # segue: o site continua publicando o que ja esta em moderacao/.
-      - name: Trazer os cadastros aprovados da planilha
+      # Um cadastro ruim NAO reprova aqui — ele sai sozinho, com AVISO no log
+      # (ADR-0006). So erro estrutural (planilha errada publicada) aborta.
+      - name: Trazer os cadastros da planilha
         env:
           PLANILHA_CSV_URL: ${{ vars.PLANILHA_CSV_URL }}
         run: node scripts/ingerir_csv.mjs

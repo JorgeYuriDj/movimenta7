@@ -15,6 +15,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # ⚠️ NAO REMOVA workflow_dispatch. Alem do botao "Run workflow", é por ele que
+  # o gatilho do formulário publica na hora: o Apps Script do dono chama
+  # POST /actions/workflows/ci.yml/dispatches a cada resposta recebida
+  # (`aoEnviarFormulario` em scripts/criar_form.gs). Tirar esta linha faz aquela
+  # chamada devolver HTTP 422 dentro da conta Google do dono, onde ninguém aqui
+  # vê o erro — o site volta a esperar o cron sem nada ficar vermelho.
+  # Congelado em tests/criar_form.test.mjs.
   workflow_dispatch:
   # A publicação é automática desde ADR-0006: ninguém aprova cadastro a cadastro,
   # então alguém precisa ir à planilha de tempos em tempos — é este cron. Sem ele

@@ -83,8 +83,8 @@ function criarFormMovimenta7() {
   form.setDescription(
     'Cadastre a atividade física do seu grupo/igreja no movimenta7 — a rede de atividades ' +
     'da comunidade adventista do DF, aberta a toda Brasília. Leva ~2 minutos.\n\n' +
-    'ATENÇÃO: o que você preencher aqui vai para o mapa público SOZINHO, em cerca de ' +
-    '10 minutos. Não existe fila de aprovação.\n\n' +
+    'ATENÇÃO: o que você preencher aqui vai para o mapa público SOZINHO, em até ' +
+    '1 hora. Não existe fila de aprovação.\n\n' +
     'NÃO PEDIMOS NENHUM DADO PESSOAL (LGPD): nem seu nome, nem telefone, nem e-mail. ' +
     'Este cadastro é sobre a ATIVIDADE e sobre a IGREJA/ORGANIZAÇÃO, e tudo o que você ' +
     'responder é público no site. NÃO escreva telefone, endereço de casa nem o nome de ' +
@@ -208,6 +208,8 @@ function criarFormMovimenta7() {
     Logger.log('OK: coluna "remover" criada e aba PUBLICAR montada — nada para colar a mao.');
     Logger.log('AGORA, na planilha: Arquivo > Compartilhar > Publicar na web,');
     Logger.log('       escolha a aba PUBLICAR (NAO "Documento inteiro") e o formato .csv.');
+    Logger.log('DEPOIS, para o cadastro entrar no mapa em ~2 minutos em vez de ate 1 hora:');
+    Logger.log('       rode `instalarGatilhoDePublicacao` (Parte 4 do COMO_LIGAR_A_PLANILHA.md).');
   } else {
     Logger.log('ATENCAO: nao achei a aba de respostas, entao a aba PUBLICAR NAO foi criada.');
     Logger.log('         Rode esta mesma funcao de novo — nada e apagado. Se falhar duas vezes, me avise.');
@@ -241,7 +243,7 @@ function acharAbaDeRespostas(ss, nomeDaAbaPadrao) {
 
 /**
  * The owner's emergency brake: tick the box and the group leaves the map on the
- * next run (~10 min). ADR-0006 removed the approval queue, so this is the only
+ * next run (up to an hour). ADR-0006 removed the approval queue, so this is the only
  * control left — it has to exist before the first registration arrives, not
  * after the first problem.
  */
@@ -254,7 +256,7 @@ function acrescentarColunaRemover(aba) {
   var col = largura + 1;
   aba.getRange(1, col).setValue(COL_REMOVER);
   aba.getRange(1, col).setNote(
-    'Marque para tirar este grupo do mapa. Ele sai sozinho em ~10 minutos.\n' +
+    'Marque para tirar este grupo do mapa. Ele sai sozinho em até 1 hora.\n' +
     'Desmarque para ele voltar. Nada é apagado da planilha.');
   // requireCheckbox() only VALIDATES the cell. insertCheckboxes() would stamp
   // FALSE into every empty row — a thousand rows of noise in the one file the
@@ -371,4 +373,273 @@ function consertarAbaPublicar() {
   Logger.log('OK: aba PUBLICAR remontada a partir de "' + respostas.getSheetName() + '".');
   Logger.log('    Os cadastros que ja estavam na planilha aparecem la agora.');
   Logger.log('    Se a aba ja estava publicada na web, nao precisa republicar.');
+}
+
+/* ===========================================================================
+ * INSTANT PUBLICATION — the trigger that takes the cron's queue out of the loop
+ * ===========================================================================
+ *
+ * Without this, the site only learns about a registration when GitHub's cron
+ * fires. That cron ASKS for every 10 minutes and GitHub delivers something else
+ * entirely: measured on 25/08/2026, four consecutive rounds took 40, 47, 43 and
+ * 55 minutes, because scheduled runs on a public repository sit in a
+ * low-priority queue. A manual run the same afternoon put the pin on the map in
+ * 40 seconds — so the wait is the queue's, not ours, and no amount of tuning on
+ * this side shortens it. The form has to speak up instead of the site polling.
+ *
+ * WHY workflow_dispatch AND NOT repository_dispatch. Both APIs start the same
+ * workflow, but a fine-grained token needs very different permissions for them
+ * (checked against GitHub's "Permissions required for fine-grained personal
+ * access tokens", 25/08/2026):
+ *     repository_dispatch -> Contents: WRITE
+ *     workflow_dispatch   -> Actions: WRITE
+ * Contents: write is permission to PUSH COMMITS, and on this project the
+ * repository IS the website — a leaked token of that kind publishes anything it
+ * likes to the map. Actions: write can only run or cancel a workflow that
+ * already exists, so the worst it can do is republish the site with the content
+ * already in it. The narrower door was also already open: ci.yml has carried
+ * `workflow_dispatch:` since the beginning, so nothing in the workflow had to be
+ * widened to make this work.
+ *
+ * WHERE THE TOKEN LIVES: in Script Properties (Apps Script > Configurações do
+ * projeto > Propriedades do script), inside the owner's Google account. NEVER in
+ * the repository, which is public (CLAUDE.md, rule 11). That rule is about keys
+ * in the repo and in the visitor's browser; a secret held in the owner's own
+ * account, which only he opens, is exactly where this one belongs.
+ *
+ * THE CRON STAYS ON, DELIBERATELY. Google disables triggers that fail too often,
+ * a fine-grained token expires on its due date, and both happen quietly. If the
+ * trigger dies, the site goes back to updating within the hour instead of not
+ * updating at all. Belt and braces, not redundancy for its own sake.
+ */
+
+/** The site's repository. Only changes if the project moves accounts. */
+var REPO_PADRAO = 'JorgeYuriDj/movimenta7';
+/** Workflow file that publishes the site (.github/workflows/ci.yml). */
+var WORKFLOW = 'ci.yml';
+/** Branch GitHub Pages publishes from. */
+var BRANCH = 'main';
+/** Handler the trigger calls; also the key used to avoid installing it twice. */
+var FUNCAO_DO_GATILHO = 'aoEnviarFormulario';
+
+var PROP_TOKEN = 'GITHUB_TOKEN';
+var PROP_REPO = 'GITHUB_REPO';
+var PROP_CSV = 'PLANILHA_CSV_URL';
+
+/* How long to wait for Google to republish the CSV before asking GitHub to
+   read it. See esperarOCsvMostrar_ for why waiting at all is the point. */
+var ESPERA_INICIAL_MS = 10000;
+var ESPERA_PASSO_MS = 15000;
+var ESPERA_TENTATIVAS = 8; // 10s + 8x15s = up to ~2min10 before giving up
+
+/**
+ * Reads a Script Property, trimmed.
+ *
+ * The trim is not cosmetic: pasting a token into that box carries a trailing
+ * newline often enough that it is a known scar in this owner's notes, and a
+ * token with "\n" on the end produces a 401 whose message says nothing about
+ * whitespace.
+ */
+function propriedade_(nome, padrao) {
+  var v = PropertiesService.getScriptProperties().getProperty(nome);
+  v = v ? String(v).trim() : '';
+  return v || padrao || '';
+}
+
+/**
+ * Asks GitHub to run the publication workflow now. Returns true, or throws with
+ * a message written for someone who is not a programmer.
+ *
+ * 204 (No Content) is this endpoint's success: it accepts the request and
+ * answers with an empty body. Treating "no body" as failure would make every
+ * successful publication look broken.
+ *
+ * No message below ever prints the token or the response body. The body of a
+ * GitHub error can echo request headers, and this text ends up in a log the
+ * owner may well paste into a chat.
+ */
+function dispararPublicacao_() {
+  var token = propriedade_(PROP_TOKEN, '');
+  if (!token) {
+    throw new Error(
+      'Falta o token do GitHub. Va em Apps Script > Configuracoes do projeto > ' +
+      'Propriedades do script > Adicionar propriedade, com o nome ' + PROP_TOKEN +
+      ' e o valor sendo o token que voce criou no GitHub. ' +
+      'Passo a passo em portugues: moderacao/COMO_LIGAR_A_PLANILHA.md, Parte 4.');
+  }
+  var repo = propriedade_(PROP_REPO, REPO_PADRAO);
+  var resp = UrlFetchApp.fetch(
+    'https://api.github.com/repos/' + repo + '/actions/workflows/' + WORKFLOW + '/dispatches',
+    {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        Authorization: 'Bearer ' + token,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      payload: JSON.stringify({ ref: BRANCH }),
+      muteHttpExceptions: true,
+    });
+
+  var codigo = resp.getResponseCode();
+  if (codigo === 204) return true;
+  throw new Error(explicarFalha_(codigo, repo));
+}
+
+/**
+ * Turns an HTTP status into the one sentence that tells the owner what to fix.
+ *
+ * This exists because the alternative — "Exception: request failed with 403" in
+ * an Apps Script execution log — is a dead end for someone who is not a
+ * programmer, and the person who has to read it is exactly that person.
+ */
+function explicarFalha_(codigo, repo) {
+  if (codigo === 401) {
+    return 'O GitHub recusou o token (401). Ele expirou, foi apagado, ou foi colado ' +
+      'incompleto. Crie outro e troque o valor de ' + PROP_TOKEN + ' nas Propriedades do script.';
+  }
+  if (codigo === 403) {
+    return 'O token existe mas nao tem permissao (403). Ele precisa de "Actions: ' +
+      'Read and write" no repositorio ' + repo + '. Refaca o token com essa permissao.';
+  }
+  if (codigo === 404) {
+    return 'O GitHub nao achou o repositorio "' + repo + '" ou o arquivo ' + WORKFLOW +
+      ' (404). Confira o nome na propriedade ' + PROP_REPO + ' — e confirme que o token ' +
+      'foi criado COM ACESSO a esse repositorio (sem acesso, o GitHub responde 404, nao 403).';
+  }
+  if (codigo === 422) {
+    return 'O GitHub achou o repositorio mas recusou o pedido (422). Quase sempre e o ' +
+      'branch: o site publica de "' + BRANCH + '". Se alguem removeu "workflow_dispatch" ' +
+      'do arquivo .github/workflows/' + WORKFLOW + ', tambem da 422.';
+  }
+  return 'O GitHub respondeu ' + codigo + ' e a publicacao nao foi pedida. ' +
+    'O site ainda vai atualizar sozinho na proxima rodada do cron (ate 1 hora).';
+}
+
+/**
+ * Waits for the published CSV to actually show the new registration.
+ *
+ * This is the whole difference between "instant" and "instant but wrong". The
+ * site does not read the spreadsheet: it reads the CSV that Google republishes
+ * from the PUBLICAR tab, and that republication is not instantaneous. Firing the
+ * workflow the millisecond a response lands would frequently publish the map
+ * WITHOUT the group that just registered — and then, because the run already
+ * happened, the person would wait a full cron round anyway, having watched the
+ * site update and not include them. Slower and more confusing than doing
+ * nothing.
+ *
+ * So the wait is bounded and it ends early: as soon as the group's name appears
+ * in the published CSV, the wait is over. If PLANILHA_CSV_URL is not set here,
+ * or the name never shows up, it gives up and dispatches anyway — a possibly
+ * early run is still better than no run, and the cron covers what is left.
+ * Never throws: a flaky network must not stop the publication.
+ */
+function esperarOCsvMostrar_(grupo) {
+  Utilities.sleep(ESPERA_INICIAL_MS);
+  var csv = propriedade_(PROP_CSV, '');
+  if (!csv || !grupo) return false;
+  for (var i = 0; i < ESPERA_TENTATIVAS; i++) {
+    if (csvJaMostra_(csv, grupo)) return true;
+    Utilities.sleep(ESPERA_PASSO_MS);
+  }
+  return false;
+}
+
+function csvJaMostra_(url, grupo) {
+  try {
+    // Same cache-buster ingerir_csv.mjs uses: the published URL is served from a
+    // ~5 minute cache, so without a parameter that changes we would keep reading
+    // the answer from before the registration and wait out the full loop.
+    var alvo = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
+    var resp = UrlFetchApp.fetch(alvo, {
+      muteHttpExceptions: true,
+      headers: { 'cache-control': 'no-cache', pragma: 'no-cache' },
+    });
+    if (resp.getResponseCode() !== 200) return false;
+    return resp.getContentText().indexOf(grupo) >= 0;
+  } catch (err) {
+    return false;
+  }
+}
+
+/**
+ * The group name of the response that just arrived, or "" if unreadable.
+ *
+ * namedValues hands back a LIST per question (a checkbox answer has several),
+ * so the name is the first entry. The Array check is not defensive padding: on
+ * a bare string, `v[0]` is the first LETTER, and searching the published CSV for
+ * "V" would match instantly and every time — the wait would always pass, which
+ * looks exactly like working and is the failure this whole function guards.
+ */
+function nomeDoGrupo_(e) {
+  if (!e || !e.namedValues) return '';
+  var v = e.namedValues[TITULOS.grupo];
+  if (!v) return '';
+  return String(Array.isArray(v) ? (v[0] || '') : v).trim();
+}
+
+/**
+ * THE TRIGGER ITSELF. Google calls this each time a response reaches the sheet.
+ *
+ * It is allowed to throw: a failure here sends the owner Google's "your script
+ * failed" e-mail, and in a project whose worst failure mode is silence that
+ * e-mail is a feature. Nothing the person who filled the form sees depends on
+ * it — the answer is already recorded in the sheet before this runs, and the
+ * cron publishes it either way.
+ */
+function aoEnviarFormulario(e) {
+  SpreadsheetApp.flush();
+  esperarOCsvMostrar_(nomeDoGrupo_(e));
+  dispararPublicacao_();
+  Logger.log('OK: publicacao pedida ao GitHub.');
+}
+
+/** Manual button: asks for a publication now, without waiting for anything. */
+function publicarAgora() {
+  dispararPublicacao_();
+  Logger.log('OK: pedido enviado. O site termina de publicar em cerca de 40 segundos.');
+  Logger.log('    Acompanhe em: https://github.com/' + propriedade_(PROP_REPO, REPO_PADRAO) + '/actions');
+}
+
+/**
+ * Installs the trigger. Run once, from inside the response spreadsheet.
+ *
+ * It ends by publishing for real, on purpose: a token that is wrong fails HERE,
+ * in front of the owner, with a sentence telling him what to fix — instead of
+ * failing quietly at the first stranger's registration, weeks later, when the
+ * only symptom is that the site feels slow again.
+ *
+ * Running it twice is safe. It never deletes a trigger (REGRA ZERO) and never
+ * adds a second one: two triggers would mean two workflow runs per registration,
+ * which is just noise in the owner's Actions tab.
+ */
+function instalarGatilhoDePublicacao() {
+  var ss = SpreadsheetApp.getActive();
+  if (!ss) {
+    throw new Error('Rode esta funcao DE DENTRO da planilha de respostas ' +
+      '(planilha > Extensoes > Apps Script), nao de um script solto.');
+  }
+  if (!propriedade_(PROP_TOKEN, '')) {
+    throw new Error(
+      'Antes de instalar o gatilho, guarde o token do GitHub: Apps Script > ' +
+      'Configuracoes do projeto > Propriedades do script > Adicionar propriedade, ' +
+      'nome ' + PROP_TOKEN + '. Passo a passo: moderacao/COMO_LIGAR_A_PLANILHA.md, Parte 4.');
+  }
+
+  var gatilhos = ScriptApp.getProjectTriggers();
+  var jaExiste = false;
+  for (var i = 0; i < gatilhos.length; i++) {
+    if (gatilhos[i].getHandlerFunction() === FUNCAO_DO_GATILHO) jaExiste = true;
+  }
+  if (jaExiste) {
+    Logger.log('OK: o gatilho ja estava instalado — nao criei um segundo.');
+  } else {
+    ScriptApp.newTrigger(FUNCAO_DO_GATILHO).forSpreadsheet(ss).onFormSubmit().create();
+    Logger.log('OK: gatilho instalado. Cada cadastro novo passa a publicar sozinho.');
+  }
+
+  dispararPublicacao_();
+  Logger.log('OK: o GitHub aceitou um pedido de publicacao agora — o token funciona.');
+  Logger.log('    Veja rodando em: https://github.com/' + propriedade_(PROP_REPO, REPO_PADRAO) + '/actions');
 }

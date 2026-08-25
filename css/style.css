@@ -291,6 +291,10 @@ a, button {
 }
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
+  /* flex:none é o que impede o texto de vazar da cápsula: sem isto, quando a
+     última linha não cabe nos 720px, o flex encolhe o item abaixo do próprio
+     conteúdo e a frase escapa por baixo da borda arredondada. */
+  flex: none;
   min-height: 44px; padding: 10px 16px; /* alvo de toque, mesmo não sendo clicável hoje */
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 999px; font-size: 15px; font-weight: 600; color: var(--text-2);

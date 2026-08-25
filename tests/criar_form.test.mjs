@@ -32,7 +32,7 @@ const ABA_RESPOSTAS = "Respostas ao formulário 1";
  */
 function ambienteFalso() {
   const titulos = [];
-  const registro = { formula: null, notas: [], validacoes: [] };
+  const registro = { formula: null, notas: [], validacoes: [], paginas: [] };
 
   const item = () => {
     const self = {
@@ -46,8 +46,19 @@ function ambienteFalso() {
     };
     return self;
   };
-  // A page break is not a question, so it never becomes a column.
-  const quebraDePagina = () => ({ setTitle: () => quebraDePagina(), setGoToPage: () => {} });
+  // A page break is not a question, so it never becomes a column. It DOES need
+  // an identity, though: the old stub threw both the title and the navigation
+  // away, so the form could send every new registrant to the removal page and
+  // the suite stayed green. It did exactly that, in production, on 25/08.
+  const quebraDePagina = () => {
+    const pagina = { titulo: null };
+    registro.paginas.push(pagina);
+    const self = {
+      setTitle: (t) => { pagina.titulo = t; return self; },
+      setGoToPage: (destino) => { pagina.destino = destino; return self; },
+    };
+    return self;
+  };
 
   function planilhaFalsa(nome) {
     const abas = [folha("Página1", [])];
@@ -132,6 +143,26 @@ const publicar = ambiente.planilha().getSheetByName("PUBLICAR");
 const respostas = ambiente.planilha().getSheetByName(ABA_RESPOSTAS);
 const cabecalhoPublicar = publicar._linha(1);
 const cabecalhoRespostas = respostas._linha(1);
+
+/**
+ * The bug this freezes cost the launch an afternoon and left no error behind.
+ *
+ * setGoToPage governs the page BEFORE the break it is called on. Calling it on
+ * the registration break said "after the consent page, submit" — overridden by
+ * the branching choice, so nothing looked broken — while the registration page
+ * kept its default linear progression into the removal page. Everyone who
+ * described their group was then asked to justify removing it, and abandoned.
+ * Empty map, green CI, no failure anywhere: nothing HAD failed.
+ */
+test("finishing the registration page submits, instead of asking to remove the group", () => {
+  const remocao = ambiente.registro.paginas.find((p) => /remo/i.test(p.titulo || ""));
+  const cadastro = ambiente.registro.paginas.find((p) => /Dados da atividade/i.test(p.titulo || ""));
+  assert.ok(remocao && cadastro, "as duas paginas precisam existir");
+  assert.equal(remocao.destino, "SUBMIT",
+    "a quebra que SEGUE o cadastro e quem faz a pagina de cadastro enviar");
+  assert.notEqual(cadastro.destino, "SUBMIT",
+    "SUBMIT na quebra do cadastro governa a pagina de consentimento, nao a de cadastro");
+});
 
 test("the script builds the PUBLICAR tab, so the owner pastes no formula", () => {
   assert.ok(publicar, "aba PUBLICAR nao foi criada");

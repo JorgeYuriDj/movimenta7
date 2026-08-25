@@ -156,14 +156,29 @@ function criarFormMovimenta7() {
     .setRequired(true)
     .setHelpText('Se for correção, escreva o dado certo. Atendemos em até 24 horas.');
 
-  // Navigation is what keeps the two paths apart. Without this line the person
-  // who finishes the registration page would fall straight into the removal
-  // page and be asked to justify removing the group they just created.
+  // Navigation is what keeps the two paths apart. Without it the person who
+  // finishes the registration page falls straight into the removal page and is
+  // asked to justify removing the group they just created.
   acao.setChoices([
     acao.createChoice('Cadastrar uma atividade nova', pgCadastro),
     acao.createChoice('Corrigir ou REMOVER um cadastro que já está no mapa', pgRemocao),
   ]);
-  pgCadastro.setGoToPage(FormApp.PageNavigationType.SUBMIT);
+
+  // ⚠️ setGoToPage governs the page BEFORE the break it is called on, not the
+  // page that starts at it: "sets the type of page navigation that occurs after
+  // completing the page before this page break" (Apps Script reference,
+  // PageBreakItem). So the line that makes the REGISTRATION page submit has to
+  // hang on pgRemocao — the break that follows it.
+  //
+  // This was wrong in the form the owner published on 25/08: it read
+  // pgCadastro.setGoToPage(SUBMIT), which set "after the consent page, submit"
+  // — harmless only because the branching choice overrides it. The registration
+  // page kept its default linear progression and dumped every person who had
+  // just described their group onto the removal page, where three required
+  // questions asked them to justify taking it back down. He filled the form,
+  // met that page, and the response was never recorded: the map stayed empty
+  // with no error anywhere, because nothing had failed.
+  pgRemocao.setGoToPage(FormApp.PageNavigationType.SUBMIT);
 
   var ss = SpreadsheetApp.create('movimenta7 — respostas');
   var abaPadrao = ss.getSheets()[0].getSheetName();

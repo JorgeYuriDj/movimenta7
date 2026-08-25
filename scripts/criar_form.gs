@@ -42,7 +42,10 @@
  *        come from TITULOS below, so drift is impossible.
  *
  * Running it again is safe: it creates a NEW form and a NEW spreadsheet and
- * never touches the previous ones (REGRA ZERO — nothing is ever deleted).
+ * never touches the previous ones (REGRA ZERO — nothing is ever deleted). That
+ * is also why it is the WRONG function once the form has been shared: to repair
+ * the PUBLICAR tab of the sheet already in use, run `consertarAbaPublicar`
+ * instead, from inside that spreadsheet.
  */
 
 /**
@@ -276,10 +279,26 @@ function acrescentarColunaRemover(aba) {
  *   first registration. Split this way, the empty state publishes a header-only
  *   CSV: zero pins, green CI, exactly what an empty map should look like.
  *
- * - COLUMNS ARE READ FROM ROW 2 DOWN ($A$2:$ZZ). INDEX(range,0,n) returns the
- *   WHOLE column, header included, and the filter keeps every row whose "Nome do
- *   grupo" is not empty — which the header row satisfies. Starting at row 1
- *   publishes the question titles themselves as a phantom registration.
+ * - COLUMNS ARE READ AS WHOLE COLUMNS ($A:$ZZ), WITH NO ROW ANCHOR AT ALL, and
+ *   the header row is dropped by an explicit condition rather than by starting
+ *   the range at row 2. This is not a style choice: $A$2 DRIFTS. Google Forms
+ *   delivers each answer by INSERTING a row, and an insert at row N pushes every
+ *   absolute reference at or below N one row down — so $A$2 became $A$3 after
+ *   the first registration and $A$4 after the second, sitting forever exactly
+ *   one row below the newest answer and therefore matching NOTHING.
+ *
+ *   Measured on 25/08/2026, on the owner's live sheet: two registrations in the
+ *   response tab, PUBLICAR empty, published CSV containing only its header row,
+ *   zero pins on the site — and a green CI the whole time, because every file in
+ *   this repository was doing exactly what it was told. A full-column reference
+ *   has no row number left to shift, which is why the fix is the range and not
+ *   a corrected row number: $A$2 typed in by hand would break again on the very
+ *   next registration.
+ *
+ *   INDEX(range,0,n) returns the WHOLE column, header included, and the filter
+ *   keeps every row whose "Nome do grupo" is not empty — which the header row
+ *   satisfies. So the header is excluded BY NAME; without that condition the
+ *   question titles publish themselves as a phantom registration.
  */
 function montarAbaPublicar(ss, respostas) {
   var aba = ss.getSheetByName(ABA_PUBLICAR) || ss.insertSheet(ABA_PUBLICAR);
@@ -288,8 +307,10 @@ function montarAbaPublicar(ss, respostas) {
   // Columns are matched BY HEADER NAME, never by letter: inserting a question in
   // the middle of the form later would otherwise slide every answer one column
   // over, under the right heading, and nobody would notice.
+  // $A$1:$ZZ$1 keeps its row anchor on purpose: Forms only ever inserts at row
+  // 2 or below, so row 1 is the one row in the sheet that cannot be pushed down.
   var coluna = function (titulo) {
-    return 'INDEX(' + ref + '$A$2:$ZZ,0,MATCH("' + titulo + '",' + ref + '$A$1:$ZZ$1,0))';
+    return 'INDEX(' + ref + '$A:$ZZ,0,MATCH("' + titulo + '",' + ref + '$A$1:$ZZ$1,0))';
   };
 
   var nomes = COLUNAS.concat([COL_REMOVER]);
@@ -297,9 +318,57 @@ function montarAbaPublicar(ss, respostas) {
   for (var i = 0; i < COLUNAS.length; i++) expressoes.push(coluna(TITULOS[COLUNAS[i]]));
   expressoes.push(coluna(COL_REMOVER));
 
+  var grupo = coluna(TITULOS.grupo);
   aba.getRange(1, 1, 1, nomes.length).setValues([nomes]);
   aba.getRange('A2').setFormula(
-    '=IFERROR(FILTER({' + expressoes.join(',') + '},' + coluna(TITULOS.grupo) + '<>""),"")');
+    '=IFERROR(FILTER({' + expressoes.join(',') + '},' +
+    grupo + '<>"",' + grupo + '<>"' + TITULOS.grupo + '"),"")');
   aba.setFrozenRows(1);
   return aba;
+}
+
+/**
+ * Repairs the PUBLICAR tab of a spreadsheet that ALREADY EXISTS — without
+ * creating a second form.
+ *
+ * criarFormMovimenta7() is the launch-day function and it always builds a NEW
+ * form and a NEW spreadsheet, so it is exactly the wrong tool once the form has
+ * been shared: the owner would be left with two forms, and the one people
+ * already have the link to would be the one nobody reads. This function touches
+ * only the tab, on the sheet it is run from.
+ *
+ * HOW THE OWNER RUNS IT: open the RESPONSES SPREADSHEET > Extensões > Apps
+ * Script, paste this whole file, pick `consertarAbaPublicar` in the function
+ * list, Executar. Nothing is deleted: it rewrites one cell (PUBLICAR!A2) and the
+ * header row, and adds the `remover` column only if it is missing.
+ */
+function consertarAbaPublicar() {
+  var ss = SpreadsheetApp.getActive();
+  if (!ss) {
+    throw new Error('Rode esta funcao DE DENTRO da planilha de respostas ' +
+      '(planilha > Extensoes > Apps Script), nao de um script solto.');
+  }
+  var respostas = acharAbaDeRespostas(ss, 'Página1');
+  // acharAbaDeRespostas() falls back to "any tab wider than one column" when no
+  // header matches — which is right on creation day, when PUBLICAR does not
+  // exist yet, and WRONG here, where it does and is 13 columns wide. Without
+  // this guard the repair could hand PUBLICAR to itself as its own source: a
+  // circular reference, plus a 14th column bolted onto the published tab. So the
+  // header match is made mandatory on this path.
+  var cabecalho = respostas
+    ? respostas.getRange(1, 1, 1, Math.max(respostas.getLastColumn(), 1)).getValues()[0]
+    : [];
+  var temColunaDoGrupo = false;
+  for (var c = 0; c < cabecalho.length; c++) {
+    if (String(cabecalho[c]).trim() === TITULOS.grupo) temColunaDoGrupo = true;
+  }
+  if (!temColunaDoGrupo) {
+    throw new Error('Nao achei a aba de respostas nesta planilha: nenhuma aba tem a coluna "' +
+      TITULOS.grupo + '" na primeira linha. Esta e a planilha ligada ao formulario?');
+  }
+  acrescentarColunaRemover(respostas);
+  montarAbaPublicar(ss, respostas);
+  Logger.log('OK: aba PUBLICAR remontada a partir de "' + respostas.getSheetName() + '".');
+  Logger.log('    Os cadastros que ja estavam na planilha aparecem la agora.');
+  Logger.log('    Se a aba ja estava publicada na web, nao precisa republicar.');
 }

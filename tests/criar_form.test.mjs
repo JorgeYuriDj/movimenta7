@@ -32,7 +32,7 @@ const ABA_RESPOSTAS = "Respostas ao formulário 1";
  */
 function ambienteFalso() {
   const titulos = [];
-  const registro = { formula: null, notas: [], validacoes: [], paginas: [] };
+  const registro = { formula: null, notas: [], validacoes: [], paginas: [], formsCriados: 0 };
 
   const item = () => {
     const self = {
@@ -91,8 +91,20 @@ function ambienteFalso() {
         const linha = typeof a === "string" ? Number(a.slice(1)) : a;
         const coluna = typeof a === "string" ? a.charCodeAt(0) - 64 : b;
         return {
-          getValues: () => [(celulas[linha - 1] || []).slice(0, b + (_c ? 0 : 0) || undefined)]
-            .map((l) => l.slice(coluna - 1, coluna - 1 + (_d ?? l.length))),
+          // Returns a rows x cols block, like the real getValues(). The first
+          // version of this stub ignored the width and handed back a single
+          // cell, so acharAbaDeRespostas() never matched a header and reached
+          // the response tab only through its own fallback — the header-matching
+          // path this file is supposed to be covering was never once executed.
+          getValues: () => {
+            const nLinhas = _c ?? 1, nColunas = _d ?? 1;
+            const bloco = [];
+            for (let r = 0; r < nLinhas; r++) {
+              const l = celulas[linha - 1 + r] || [];
+              bloco.push(l.slice(coluna - 1, coluna - 1 + nColunas));
+            }
+            return bloco;
+          },
           setValue: (v) => escrever(linha, coluna, v),
           setValues: (m) => m[0].forEach((v, i) => escrever(linha, coluna + i, v)),
           setFormula: (f) => { registro.formula = f; },
@@ -109,6 +121,7 @@ function ambienteFalso() {
     DestinationType: { SPREADSHEET: "SPREADSHEET" },
     PageNavigationType: { SUBMIT: "SUBMIT" },
     create: () => {
+      registro.formsCriados++;
       const form = {
         setDescription: () => form,
         setCollectEmail: () => form,
@@ -129,6 +142,7 @@ function ambienteFalso() {
   const SpreadsheetApp = {
     create: (nome) => { planilha = planilhaFalsa(nome); return planilha; },
     openById: () => planilha,
+    getActive: () => planilha, // o que consertarAbaPublicar usa: a planilha aberta
     flush: () => {},
     newDataValidation: () => ({ requireCheckbox: () => ({ build: () => "CHECKBOX" }) }),
   };
@@ -196,12 +210,46 @@ test("the formula quotes the real response sheet name", () => {
   assert.ok(!ambiente.registro.formula.includes("Respostas!$A"), "nome de aba fixado no codigo");
 });
 
-// Regression: INDEX(range,0,n) returns the header row too, and the filter keeps
-// every row with a non-empty "Nome do grupo" — which the header satisfies. Read
-// from row 1 and the question titles publish themselves as a phantom group.
-test("the formula reads answers from row 2 down, never the header row", () => {
-  assert.ok(ambiente.registro.formula.includes("$A$2:$ZZ"), "leitura comeca na linha 1");
-  assert.ok(!/INDEX\('[^']+'!\$A\$1:\$ZZ,0/.test(ambiente.registro.formula));
+/**
+ * THE BUG THAT EMPTIED THE MAP, frozen so it cannot come back.
+ *
+ * The formula used to read $A$2:$ZZ, which is correct for exactly as long as
+ * nobody answers the form. Google Forms delivers a response by INSERTING a row,
+ * and an insert at row N pushes every absolute reference at or below N one row
+ * down — so $A$2 became $A$3 after the first registration and $A$4 after the
+ * second, always one row below the newest answer, matching NOTHING.
+ *
+ * Measured on the owner's live sheet on 25/08/2026: two registrations, PUBLICAR
+ * empty, published CSV with only its header, zero pins — and a green CI
+ * throughout, because no file in this repository was misbehaving.
+ *
+ * The fix is the RANGE, not a corrected row number: $A$2 retyped by hand would
+ * drift again on the very next registration. A whole-column reference has no
+ * row number left to shift.
+ */
+test("no reference into the answers can be pushed down by a new response", () => {
+  const formula = ambiente.registro.formula;
+  const ancorados = [...formula.matchAll(/INDEX\('[^']+'!\$A\$(\d+)/g)].map((m) => m[1]);
+  assert.deepEqual(ancorados, [],
+    `INDEX ancorado na linha ${ancorados.join(", ")} — vai derivar a cada cadastro`);
+  assert.ok(formula.includes("$A:$ZZ"), "a leitura precisa ser de coluna inteira");
+});
+
+// The only row-anchored range left is the header row MATCH() searches. That one
+// is safe for the same reason the others were not: Forms inserts at row 2 or
+// below, so row 1 is the single row in the sheet that never moves.
+test("the only row still pinned by number is the header row", () => {
+  const faixas = [...ambiente.registro.formula.matchAll(/\$A\$\d+:\$ZZ\$\d+/g)].map((m) => m[0]);
+  assert.ok(faixas.length > 0, "MATCH precisa procurar na linha de cabecalho");
+  assert.deepEqual([...new Set(faixas)], ["$A$1:$ZZ$1"]);
+});
+
+// Reading whole columns means the header row now arrives INSIDE the data, and
+// it survives "Nome do grupo" <> "" — so it is excluded by name instead. Drop
+// this condition and the question titles publish themselves as a phantom group.
+test("the header row is excluded by name, since the range no longer skips it", () => {
+  assert.ok(ambiente.registro.formula.includes('<>"Nome do grupo"'),
+    "sem esta condicao o cabecalho vira um cadastro fantasma no mapa");
 });
 
 // Regression: headers stacked over FILTER in one array literal is an
@@ -247,4 +295,35 @@ test("ticking `remover` takes the group off the map", () => {
   const csv = cabecalhoPublicar.join(",") + "\n" +
     cabecalhoPublicar.map((c) => (c === "remover" ? '"TRUE"' : '"x"')).join(",") + "\n";
   assert.deepEqual(registrosPublicaveis(csv), []);
+});
+
+/**
+ * The repair path, which is the one that actually ran on 25/08/2026.
+ *
+ * criarFormMovimenta7() always builds a NEW form and a NEW spreadsheet, so once
+ * the form link has been shared it is the wrong tool: the owner would end up
+ * with two forms and the wrong one in everybody's hands. consertarAbaPublicar()
+ * rebuilds only the tab, on the sheet it is run from — and this test exists
+ * because that distinction is invisible until it has already happened.
+ */
+test("consertarAbaPublicar rewrites the tab without creating a second form", () => {
+  const antes = ambiente.registro.formsCriados;
+  // Whatever is in the cell today — including the drifted formula from the
+  // owner's sheet — has to be replaced, not merged with.
+  ambiente.registro.formula = `=IFERROR(FILTER(INDEX('Form Responses 1'!$A$4:$ZZ,0,1)),"")`;
+
+  vm.runInContext("consertarAbaPublicar();", ambiente.contexto);
+
+  assert.equal(ambiente.registro.formsCriados, antes, "criou um formulario novo — nao pode");
+  assert.ok(!ambiente.registro.formula.includes("$A$4"), "a formula velha ficou na celula");
+  assert.ok(ambiente.registro.formula.includes("$A:$ZZ"), "nao remontou a formula");
+  // The failure the guard in consertarAbaPublicar exists for: PUBLICAR is 13
+  // columns wide, so acharAbaDeRespostas()'s "any wide tab" fallback can hand it
+  // back as its own source — a circular reference that publishes nothing.
+  assert.ok(ambiente.registro.formula.includes(`'${ABA_RESPOSTAS}'!`),
+    "a formula tem que ler a aba de RESPOSTAS");
+  assert.ok(!ambiente.registro.formula.includes("PUBLICAR!"),
+    "a aba PUBLICAR virou fonte dela mesma");
+  // And the tab it leaves behind still has to be the one the ingestion accepts.
+  assert.deepEqual(registrosPublicaveis(publicar._linha(1).join(",") + "\n"), []);
 });

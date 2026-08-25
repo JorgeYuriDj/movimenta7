@@ -1,5 +1,6 @@
 /**
- * movimenta7 — creates the activity registration Google Form + linked Sheet.
+ * movimenta7 — creates the activity registration Google Form, the linked Sheet,
+ * and the PUBLICAR tab that the site reads.
  * Run once in script.google.com (function: criarFormMovimenta7). Owner: Jorge Yuri.
  * All user-facing strings are pt-BR; code is English (project convention).
  *
@@ -23,7 +24,57 @@
  * answer that can send a visitor somewhere harmful, and nobody reviews it
  * before it goes live, so it is restricted to social profiles and map links —
  * enforced by the host allowlist in js/util.js, not by this form.
+ *
+ * 3. IT ALSO BUILDS THE PUBLICAR TAB (25/08/2026), which used to be a 20-line
+ *    array formula the owner pasted by hand. That paste was the most
+ *    failure-prone step of the whole launch, and every reason why disappears by
+ *    doing it here instead:
+ *      - the response sheet's name is locale-dependent ("Respostas ao
+ *        formulário 1", "Form Responses 1", plus a number when a file receives
+ *        more than one form). The pasted formula hard-coded "Respostas!" and
+ *        the guide asked the owner to find and fix it by hand;
+ *      - a formula typed into the grid is parsed in the SPREADSHEET's locale —
+ *        pt-BR separates arguments with ";", en-US with ",". setFormula() always
+ *        takes the US form and the sheet converts it, so the separators cannot
+ *        come out wrong here;
+ *      - the MATCH() strings repeated the question titles by hand, and any drift
+ *        between the two lists produced #REF! in a tab nobody looks at. Both now
+ *        come from TITULOS below, so drift is impossible.
+ *
+ * Running it again is safe: it creates a NEW form and a NEW spreadsheet and
+ * never touches the previous ones (REGRA ZERO — nothing is ever deleted).
  */
+
+/**
+ * Question title -> column name in moderacao/aprovados.json.
+ * Single source of truth: the questions and the PUBLICAR formula are both
+ * generated from this object. The column names must stay equal to COLUNAS in
+ * scripts/ingerir_csv.mjs, which aborts on any column it does not recognise.
+ */
+var TITULOS = {
+  grupo: 'Nome do grupo',
+  organizacao: 'Igreja ou organização responsável',
+  regiao: 'Região administrativa (DF)',
+  modalidades: 'Modalidade(s)',
+  dias: 'Dia(s) da semana',
+  horario: 'Horário de início (ex.: 06h30)',
+  local: 'Local do encontro (ponto público — parque, quadra, portão da igreja)',
+  rede_social: '@ do Instagram ou link da rede social da igreja/grupo',
+  mapa: 'Link do Google Maps do local do encontro',
+  orientacao_profissional: 'Tipo de atividade',
+  custo: 'Custo',
+  publico: 'Aberta a quem?',
+};
+
+/** Column order of the PUBLICAR tab. Same order as ingerir_csv.mjs. */
+var COLUNAS = [
+  'grupo', 'organizacao', 'regiao', 'modalidades', 'dias', 'horario',
+  'local', 'rede_social', 'mapa', 'orientacao_profissional', 'custo', 'publico',
+];
+
+var COL_REMOVER = 'remover';
+var ABA_PUBLICAR = 'PUBLICAR';
+
 function criarFormMovimenta7() {
   var form = FormApp.create('movimenta7 — Cadastro de atividade física');
   form.setDescription(
@@ -51,11 +102,11 @@ function criarFormMovimenta7() {
   // ---------- página 2: cadastro (as colunas que viram pin) ----------
   var pgCadastro = form.addPageBreakItem().setTitle('Dados da atividade');
 
-  form.addTextItem().setTitle('Nome do grupo').setRequired(true)
+  form.addTextItem().setTitle(TITULOS.grupo).setRequired(true)
     .setHelpText('Ex.: Corredores da IASD Águas Claras. Nome do GRUPO, não o seu.');
-  form.addTextItem().setTitle('Igreja ou organização responsável').setRequired(true);
+  form.addTextItem().setTitle(TITULOS.organizacao).setRequired(true);
 
-  form.addListItem().setTitle('Região administrativa (DF)').setRequired(true).setChoiceValues([
+  form.addListItem().setTitle(TITULOS.regiao).setRequired(true).setChoiceValues([
     'Águas Claras','Arniqueira','Brazlândia','Candangolândia','Ceilândia','Cruzeiro',
     'Fercal','Gama','Guará','Itapoã','Jardim Botânico','Lago Norte','Lago Sul',
     'Núcleo Bandeirante','Paranoá','Park Way','Planaltina','Plano Piloto','Recanto das Emas',
@@ -63,35 +114,35 @@ function criarFormMovimenta7() {
     'SIA','Sobradinho','Sobradinho II','Sol Nascente/Pôr do Sol','Sudoeste/Octogonal',
     'Taguatinga','Varjão','Vicente Pires','Arapoanga','Água Quente','Entorno (fora do DF)']);
 
-  form.addCheckboxItem().setTitle('Modalidade(s)').setRequired(true).setChoiceValues([
+  form.addCheckboxItem().setTitle(TITULOS.modalidades).setRequired(true).setChoiceValues([
     'Corrida','Caminhada','Ciclismo','Vôlei','Futebol','Funcional','Trilhas','Natação','Outra']);
 
-  form.addCheckboxItem().setTitle('Dia(s) da semana').setRequired(true).setChoiceValues([
+  form.addCheckboxItem().setTitle(TITULOS.dias).setRequired(true).setChoiceValues([
     'Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado (após o pôr do sol)']);
-  form.addTextItem().setTitle('Horário de início (ex.: 06h30)').setRequired(true);
+  form.addTextItem().setTitle(TITULOS.horario).setRequired(true);
 
-  form.addTextItem().setTitle('Local do encontro (ponto público — parque, quadra, portão da igreja)')
+  form.addTextItem().setTitle(TITULOS.local)
     .setRequired(true)
     .setHelpText('Nunca informe endereço de residência.');
 
   // The professional's NAME and CREF number used to be asked here. Both identify
   // a person, so both are gone; what the visitor actually needs to know is
   // whether someone qualified is running the session, and that is this answer.
-  form.addMultipleChoiceItem().setTitle('Tipo de atividade').setRequired(true).setChoiceValues([
+  form.addMultipleChoiceItem().setTitle(TITULOS.orientacao_profissional).setRequired(true).setChoiceValues([
     'Encontro social de prática livre',
     'Atividade orientada por profissional de Educação Física']);
 
-  form.addCheckboxItem().setTitle('Aberta a quem?').setChoiceValues([
+  form.addCheckboxItem().setTitle(TITULOS.publico).setChoiceValues([
     'Aberta a toda a comunidade (não precisa ser adventista)','Iniciantes bem-vindos',
     'Famílias com crianças (acompanhadas dos responsáveis)','Acessível para PCD','Idosos']);
-  form.addMultipleChoiceItem().setTitle('Custo').setRequired(true)
+  form.addMultipleChoiceItem().setTitle(TITULOS.custo).setRequired(true)
     .setChoiceValues(['Gratuito','Pago']);
 
-  form.addTextItem().setTitle('@ do Instagram ou link da rede social da igreja/grupo')
+  form.addTextItem().setTitle(TITULOS.rede_social)
     .setHelpText('Ex.: @iasd.aguasclaras — ou o endereço do perfil no Instagram, Facebook, ' +
       'YouTube ou Strava. NÃO coloque telefone nem link de grupo de WhatsApp: o site recusa. ' +
       'Deixe em branco se o grupo não tiver perfil.');
-  form.addTextItem().setTitle('Link do Google Maps do local do encontro')
+  form.addTextItem().setTitle(TITULOS.mapa)
     .setHelpText('No app do Google Maps: procure o lugar, toque em Compartilhar e cole o ' +
       'endereço aqui (fica parecido com maps.app.goo.gl/...). Use o local do ENCONTRO ou o da ' +
       'igreja — nunca a casa de alguém. Deixe em branco se não tiver.');
@@ -115,9 +166,125 @@ function criarFormMovimenta7() {
   pgCadastro.setGoToPage(FormApp.PageNavigationType.SUBMIT);
 
   var ss = SpreadsheetApp.create('movimenta7 — respostas');
+  var abaPadrao = ss.getSheets()[0].getSheetName();
   form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+
+  // setDestination writes the response sheet through another service, so the
+  // handle we already hold does not see it yet. Without flush + reopen,
+  // getSheets() below returns only the empty tab the file was born with.
+  SpreadsheetApp.flush();
+  ss = SpreadsheetApp.openById(ss.getId());
+
+  var respostas = acharAbaDeRespostas(ss, abaPadrao);
+  var publicar = null;
+  if (respostas) {
+    acrescentarColunaRemover(respostas);
+    publicar = montarAbaPublicar(ss, respostas);
+  }
 
   Logger.log('Form (editar): ' + form.getEditUrl());
   Logger.log('Form (PUBLICAR ESTE): ' + form.getPublishedUrl());
   Logger.log('Planilha de respostas: ' + ss.getUrl());
+  if (publicar) {
+    Logger.log('OK: aba de respostas encontrada ("' + respostas.getSheetName() + '")');
+    Logger.log('OK: coluna "remover" criada e aba PUBLICAR montada — nada para colar a mao.');
+    Logger.log('AGORA, na planilha: Arquivo > Compartilhar > Publicar na web,');
+    Logger.log('       escolha a aba PUBLICAR (NAO "Documento inteiro") e o formato .csv.');
+  } else {
+    Logger.log('ATENCAO: nao achei a aba de respostas, entao a aba PUBLICAR NAO foi criada.');
+    Logger.log('         Rode esta mesma funcao de novo — nada e apagado. Se falhar duas vezes, me avise.');
+  }
+}
+
+/**
+ * The response sheet is found by its CONTENT, not by its name: Google names it
+ * after the account's locale ("Respostas ao formulário 1" / "Form Responses 1")
+ * and appends a number when one file receives more than one form. The header row
+ * is the one thing we control, so that is what we look for.
+ */
+function acharAbaDeRespostas(ss, nomeDaAbaPadrao) {
+  var abas = ss.getSheets();
+  for (var i = 0; i < abas.length; i++) {
+    var largura = abas[i].getLastColumn();
+    if (largura < 1) continue;
+    var cabecalho = abas[i].getRange(1, 1, 1, largura).getValues()[0];
+    for (var c = 0; c < cabecalho.length; c++) {
+      if (String(cabecalho[c]).trim() === TITULOS.grupo) return abas[i];
+    }
+  }
+  // Fallback: any tab that is not the empty one the file was born with — but it
+  // must already have a header row, or `remover` would land in column 1 and
+  // overwrite an answer.
+  for (var j = 0; j < abas.length; j++) {
+    if (abas[j].getSheetName() !== nomeDaAbaPadrao && abas[j].getLastColumn() > 1) return abas[j];
+  }
+  return null;
+}
+
+/**
+ * The owner's emergency brake: tick the box and the group leaves the map on the
+ * next run (~10 min). ADR-0006 removed the approval queue, so this is the only
+ * control left — it has to exist before the first registration arrives, not
+ * after the first problem.
+ */
+function acrescentarColunaRemover(aba) {
+  var largura = aba.getLastColumn();
+  var cabecalho = aba.getRange(1, 1, 1, largura).getValues()[0];
+  for (var i = 0; i < cabecalho.length; i++) {
+    if (String(cabecalho[i]).trim() === COL_REMOVER) return; // já existe: nada a fazer
+  }
+  var col = largura + 1;
+  aba.getRange(1, col).setValue(COL_REMOVER);
+  aba.getRange(1, col).setNote(
+    'Marque para tirar este grupo do mapa. Ele sai sozinho em ~10 minutos.\n' +
+    'Desmarque para ele voltar. Nada é apagado da planilha.');
+  // requireCheckbox() only VALIDATES the cell. insertCheckboxes() would stamp
+  // FALSE into every empty row — a thousand rows of noise in the one file the
+  // owner has to be able to read at a glance.
+  var linhas = Math.max(aba.getMaxRows() - 1, 1);
+  aba.getRange(2, col, linhas, 1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireCheckbox().build());
+}
+
+/**
+ * Builds the tab that gets published as CSV — the site's only input.
+ *
+ * Two deliberate choices, both of which cost a red CI to learn:
+ *
+ * - HEADERS ARE PLAIN TEXT IN ROW 1 and the formula lives in A2. The obvious
+ *   alternative — one array literal stacking the headers over FILTER — breaks on
+ *   the very day this is set up: with zero responses FILTER returns #N/A,
+ *   IFERROR turns that into a single empty cell, and a 13-column row over a
+ *   1-column row is an ARRAY_LITERAL error. The published CSV would then be the
+ *   error text, which ingerir_csv.mjs correctly reads as "the wrong document was
+ *   published" and aborts — a red build every 10 minutes between setup and the
+ *   first registration. Split this way, the empty state publishes a header-only
+ *   CSV: zero pins, green CI, exactly what an empty map should look like.
+ *
+ * - COLUMNS ARE READ FROM ROW 2 DOWN ($A$2:$ZZ). INDEX(range,0,n) returns the
+ *   WHOLE column, header included, and the filter keeps every row whose "Nome do
+ *   grupo" is not empty — which the header row satisfies. Starting at row 1
+ *   publishes the question titles themselves as a phantom registration.
+ */
+function montarAbaPublicar(ss, respostas) {
+  var aba = ss.getSheetByName(ABA_PUBLICAR) || ss.insertSheet(ABA_PUBLICAR);
+  // A sheet name with spaces or an apostrophe has to be quoted inside a formula.
+  var ref = "'" + respostas.getSheetName().replace(/'/g, "''") + "'!";
+  // Columns are matched BY HEADER NAME, never by letter: inserting a question in
+  // the middle of the form later would otherwise slide every answer one column
+  // over, under the right heading, and nobody would notice.
+  var coluna = function (titulo) {
+    return 'INDEX(' + ref + '$A$2:$ZZ,0,MATCH("' + titulo + '",' + ref + '$A$1:$ZZ$1,0))';
+  };
+
+  var nomes = COLUNAS.concat([COL_REMOVER]);
+  var expressoes = [];
+  for (var i = 0; i < COLUNAS.length; i++) expressoes.push(coluna(TITULOS[COLUNAS[i]]));
+  expressoes.push(coluna(COL_REMOVER));
+
+  aba.getRange(1, 1, 1, nomes.length).setValues([nomes]);
+  aba.getRange('A2').setFormula(
+    '=IFERROR(FILTER({' + expressoes.join(',') + '},' + coluna(TITULOS.grupo) + '<>""),"")');
+  aba.setFrozenRows(1);
+  return aba;
 }

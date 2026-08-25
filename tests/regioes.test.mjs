@@ -11,9 +11,12 @@ const feicoes = new Set(geo.features.map((f) => norm(f.properties?.ra)));
 
 /** The 36 dropdown options the Google Form actually offers. */
 function opcoesDoFormulario() {
-  // split after the opening "[" so the title's own closing quote does not
-  // shift every quote pair by one
-  const bloco = gs.split("Região administrativa (DF)")[1].split("setChoiceValues([")[1].split("]);")[0];
+  // Anchored on the setTitle CALL, not on the title text. The text now also
+  // appears in the TITULOS constant at the top of the file, and splitting on it
+  // landed this parser on the consent question's choices instead — a test that
+  // reads the wrong block is worse than no test, because it still goes green
+  // once the wrong block happens to satisfy it.
+  const bloco = gs.split("setTitle(TITULOS.regiao)")[1].split("setChoiceValues([")[1].split("]);")[0];
   return [...bloco.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 }
 

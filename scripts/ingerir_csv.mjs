@@ -30,6 +30,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CAMPOS_PUBLICOS, CHECAGENS_DE_VALOR, isPrivateKey } from "./denylist.mjs";
 import { linkMapa, linkRedeSocial, MAX_RECORDS } from "../js/util.js";
+import { coordenadaDeUrl, descartarCoordenadasRepetidas } from "./coordenadas.mjs";
 
 const OUT = new URL("../moderacao/aprovados.json", import.meta.url);
 const URL_CSV = process.env.PLANILHA_CSV_URL?.trim();
@@ -200,8 +201,37 @@ export function registrosPublicaveis(texto) {
     }
     vistos.add(chave);
 
+    /**
+     * The pin's real position, when the pasted link already carries one.
+     *
+     * Reading it here rather than at publication time is deliberate: this is the
+     * only step that ever sees what the person actually typed. Nothing is
+     * fetched — a full google.com/maps/place/... URL names its coordinate in the
+     * URL itself, so this costs one regular expression and no network at all.
+     *
+     * A short maps.app.goo.gl link — what the Compartilhar button produces, and
+     * therefore the common case — carries NO coordinate and has to be followed
+     * first. That step is not wired in yet, on purpose: it would put an
+     * uncached request per group per run against Google into a pipeline that
+     * runs every ten minutes. Until then those groups keep falling back to the
+     * region centroid, which is what they did before, so nothing regresses.
+     *
+     * Whatever comes out is still checked at publication: outside the DF is
+     * refused, and a region that disagrees with the coordinate is corrected to
+     * match it.
+     */
+    if (rec.mapa) {
+      const pos = coordenadaDeUrl(rec.mapa);
+      if (pos) { rec.lat = pos.lat; rec.lon = pos.lon; }
+    }
+
     registros.push(rec);
   });
+
+  // Several groups on the exact same point means an upstream answered with a
+  // constant, not that they all meet in one spot. Measured on 25/08: Google
+  // serves a robot the same map for every query it will not resolve.
+  descartarCoordenadasRepetidas(registros).avisos.forEach((a) => descartes.push(a));
 
   descartes.forEach((d) => console.warn("AVISO: " + d));
 

@@ -27,6 +27,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 // Same denylist the CI gate uses — one list, so the two can never disagree.
 import { CAMPOS_PUBLICOS, CHECAGENS_DE_VALOR, isPrivateKey } from "./denylist.mjs";
+import { ringsOf, interiorPoint, regiaoDaCoordenada } from "./coordenadas.mjs";
 
 const IN = new URL("../moderacao/aprovados.json", import.meta.url);
 const GEO = new URL("../data/ra_df.geojson", import.meta.url);
@@ -41,50 +42,11 @@ const PUBLIC_KEYS = CAMPOS_PUBLICOS;
 const fail = (msg) => { console.error("PUBLICACAO ABORTADA: " + msg); process.exit(1); };
 
 // ---------- geometry ----------
-
-const ringsOf = (geom) =>
-  geom.type === "Polygon" ? [geom.coordinates[0]]
-    : geom.type === "MultiPolygon" ? geom.coordinates.map((p) => p[0])
-      : [];
-
-function pointInRing(lon, lat, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > lat) !== (yj > lat) &&
-      lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
-// Signed-area centroid; for concave regions it can land outside the polygon,
-// so it is checked and replaced by a grid-scanned interior point when needed.
-function centroidOf(ring) {
-  let a = 0, cx = 0, cy = 0;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    const f = xj * yi - xi * yj;
-    a += f; cx += (xj + xi) * f; cy += (yj + yi) * f;
-  }
-  if (a === 0) return null;
-  a *= 0.5;
-  return [cx / (6 * a), cy / (6 * a)];
-}
-
-function interiorPoint(ring) {
-  const c = centroidOf(ring);
-  if (c && pointInRing(c[0], c[1], ring)) return c;
-  const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const y0 = Math.min(...ys), y1 = Math.max(...ys);
-  for (let i = 1; i < 20; i++) {
-    for (let j = 1; j < 20; j++) {
-      const x = x0 + ((x1 - x0) * i) / 20, y = y0 + ((y1 - y0) * j) / 20;
-      if (pointInRing(x, y, ring)) return [x, y];
-    }
-  }
-  return null;
-}
+// The point-in-polygon and centroid helpers used to live here. They moved to
+// scripts/coordenadas.mjs, which the ingest also uses: two copies of a
+// point-in-polygon test in one repository is one copy too many, and the day they
+// disagreed would be the day the ingest and the publisher placed the same group
+// in two different regions.
 
 const norm = (s) => String(s || "").normalize("NFD")
   .replace(/[̀-ͯ]/g, "").toLowerCase().trim();
@@ -120,8 +82,14 @@ const regioes = buildRegionIndex(geo);
 // predates the Arapoanga / Água Quente splits. Without this map those groups
 // were counted and then silently vanished from the map.
 const mapaRegioes = new Map();
+// The way back: from the polygon's own name to the label the form shows. Needed
+// because when a link's coordinate contradicts the region someone picked from
+// the dropdown, the correction has to be written in the words a visitor reads,
+// not in the spelling the IPEDF layer happens to use.
+const rotuloPorFeicao = new Map();
 for (const r of JSON.parse(readFileSync(REG, "utf8")).regioes || []) {
   mapaRegioes.set(norm(r.rotulo), r);
+  if (r.feicao) rotuloPorFeicao.set(norm(r.feicao), r.rotulo);
 }
 
 const erros = [];
@@ -162,8 +130,48 @@ aprovados.forEach((r, i) => {
     rede_social: r.rede_social || "", mapa: r.mapa || "",
   };
 
-  if (Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))) {
-    rec.lat = Number(r.lat); rec.lon = Number(r.lon);
+  /**
+   * A coordinate the ingest managed to resolve, checked against the real
+   * polygons — not against the bounding box js/util.js uses, which also
+   * contains a wide band of Goiás and so never actually meant "in the DF".
+   *
+   * WHEN THE COORDINATE AND THE DROPDOWN DISAGREE, THE COORDINATE WINS and the
+   * region is rewritten to match. That is the opposite of the obvious rule, so:
+   * the failure that started this work was two groups whose real address is the
+   * 502 Sul, registered under Samambaia. Validating the position against the
+   * declared region would have thrown away the one fact that was right and kept
+   * the one that was wrong. A dropdown is someone's guess about which
+   * administrative region contains their street; a shared map link is where
+   * they actually stood.
+   */
+  const lat = Number(r.lat), lon = Number(r.lon);
+  const temCoordenada = Number.isFinite(lat) && Number.isFinite(lon);
+  const feicaoReal = temCoordenada ? regiaoDaCoordenada(lat, lon, geo) : "";
+
+  if (temCoordenada && !feicaoReal) {
+    // Refusing it is the point: without this, one wrong link drags a pin to
+    // another state and the map claims a group meets there.
+    semCoordenada.push(`${rotulo}: a posicao do link cai FORA do DF e foi recusada — ` +
+      `o grupo entra no centro da regiao declarada, "${r.regiao}"`);
+  }
+
+  if (temCoordenada && feicaoReal) {
+    rec.lat = lat; rec.lon = lon;
+    const declarada = mapaRegioes.get(norm(r.regiao));
+    if (declarada?.feicao && norm(declarada.feicao) !== norm(feicaoReal)) {
+      const certa = rotuloPorFeicao.get(norm(feicaoReal));
+      if (certa) {
+        semCoordenada.push(`${rotulo}: escolheu "${r.regiao}" no formulario, mas o link do mapa ` +
+          `aponta para ${certa} — vale o link, e a regiao foi corrigida`);
+        rec.regiao = certa;
+      } else {
+        // The point is inside the DF but in a region data/regioes.json does not
+        // list. Keeping the position and the declared label is the least-wrong
+        // answer available: the pin is right, only its caption is approximate.
+        semCoordenada.push(`${rotulo}: o link cai em "${feicaoReal}", que nao esta em ` +
+          `data/regioes.json — pin mantido no lugar certo, regiao segue como "${r.regiao}"`);
+      }
+    }
   } else {
     // Fail loudly. A region we cannot place used to pass with a console.warn
     // nobody reads, so the group was counted and never drawn.

@@ -102,6 +102,44 @@ As duas únicas coisas que você faz, e só quando precisar:
   `remover` na linha do grupo citado. Se for correção, peça para a pessoa cadastrar de
   novo com o dado certo e marque `remover` na linha antiga.
 
+## 🛑 O mapa está vazio mesmo com gente cadastrada (25/08/2026)
+
+Isto aconteceu de verdade, e é a falha mais traiçoeira do projeto: **tudo parece certo**.
+O CI fica verde, o endereço do CSV está publicado, o site está no ar — e o mapa não tem
+nenhum pin, com cadastros preenchidos na planilha.
+
+**O que acontece:** a aba PUBLICAR é montada por uma fórmula que lê a aba de respostas.
+O Google Forms grava cada resposta **inserindo uma linha**, e inserir linha **empurra a
+fórmula para baixo junto**. Ela nasceu apontando para a linha 2, virou linha 3 no primeiro
+cadastro e linha 4 no segundo — sempre uma linha ABAIXO da resposta mais nova. Ou seja:
+ela nunca mais acha nada, e vai piorando a cada pessoa que se cadastra.
+
+**Como saber se é isso:** abra a aba **PUBLICAR**. Se a linha 1 tem os títulos
+(`grupo`, `organizacao`, …) e da linha 2 para baixo está **vazio**, enquanto a aba de
+respostas tem cadastros — é isto.
+
+### O conserto (1 minuto, escolha UM dos dois)
+
+**Jeito curto — colar uma fórmula:** na aba **PUBLICAR**, clique na célula **A2**, apague
+o que estiver lá e cole a fórmula que está em `scripts/PUBLICAR_A2.txt` (neste repositório).
+Os cadastros aparecem na hora.
+
+> ⚠️ A fórmula do arquivo usa o nome `'Form Responses 1'` para a aba de respostas. Se a sua
+> aba tiver outro nome (ex.: `Respostas ao formulário 1`), troque **os dois nomes** dentro da
+> fórmula — ou use o jeito de baixo, que descobre o nome sozinho.
+
+**Jeito à prova de nome — rodar o script:** na **planilha**, menu **Extensões > Apps Script**,
+apague o que estiver lá, cole o conteúdo de `scripts/criar_form.gs`, escolha
+**`consertarAbaPublicar`** na lista de funções e clique em **Executar**. Ele acha a aba de
+respostas sozinho, remonta a PUBLICAR e **não cria formulário novo**.
+
+Nos dois casos: **não precisa republicar o CSV** nem mexer no GitHub. O site pega na próxima
+rodada (até 1 hora) — ou na hora, se você for em Actions > **ci e publicacao** > **Run workflow**.
+
+**Por que não vai voltar a acontecer:** a fórmula agora lê **colunas inteiras**, que não têm
+número de linha para ser empurrado. `tests/criar_form.test.mjs` reprova o build se alguém
+reintroduzir a versão com linha fixa.
+
 ## Se der erro
 
 O erro vem escrito em português no log do GitHub (Actions > **ci e publicacao**). Os mais

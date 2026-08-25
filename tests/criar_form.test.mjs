@@ -327,3 +327,26 @@ test("consertarAbaPublicar rewrites the tab without creating a second form", () 
   // And the tab it leaves behind still has to be the one the ingestion accepts.
   assert.deepEqual(registrosPublicaveis(publicar._linha(1).join(",") + "\n"), []);
 });
+
+/**
+ * scripts/PUBLICAR_A2.txt is the formula the owner pastes by hand to repair a
+ * sheet that is already live. It is a COPY of what montarAbaPublicar() builds,
+ * and a stale copy fails in the worst way available: a wrong MATCH() string
+ * makes the whole FILTER return #N/A, IFERROR turns that into "", and the tab
+ * goes quietly empty — the very failure this file exists to prevent. So the
+ * copy is compared against the generator on every run.
+ *
+ * The two differ only in the response tab's name (the file targets an en-US
+ * account, the stub a pt-BR one), so that is normalised away before comparing.
+ */
+test("the paste-by-hand formula still matches the one the script generates", () => {
+  const arquivo = readFileSync(new URL("../scripts/PUBLICAR_A2.txt", import.meta.url), "utf8");
+  // indexOf + slice, sem regex: a formula e a ultima coisa do arquivo, e
+  // escapar quebra de linha aqui ja custou tres tentativas.
+  const doArquivo = arquivo.slice(arquivo.indexOf("=IFERROR(")).trim();
+  assert.ok(doArquivo, "nao achei a formula em scripts/PUBLICAR_A2.txt");
+
+  const semNomeDeAba = (f) => f.replace(/'[^']+'!/g, "'ABA'!");
+  assert.equal(semNomeDeAba(doArquivo.trim()), semNomeDeAba(ambiente.registro.formula),
+    "PUBLICAR_A2.txt ficou desatualizado: gere de novo antes de mandar o dono colar");
+});

@@ -6,7 +6,10 @@
   <!-- CSP: a página renderiza dado vindo de formulário aberto; isto transforma
        uma regressão de XSS em violação bloqueada. unpkg = Leaflet com SRI;
        cartocdn/osm = tiles do mapa (imagens). Pages não emite header — meta tag
-       é mitigação parcial documentada (ADR-0004). -->
+       é mitigação parcial documentada (ADR-0004).
+       As fontes são SELF-HOSTED de propósito: com default-src 'self', um CDN de
+       fonte exigiria abrir font-src para terceiro — mais superfície e mais uma
+       conexão no 4G, para ganhar nada. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com; img-src 'self' data: https://unpkg.com https://*.basemaps.cartocdn.com https://tile.openstreetmap.org; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'">
   <title>movimenta7 — atividade física em comunidade no DF</title>
   <meta name="description" content="Encontre uma atividade física perto de você no DF: corrida, caminhada, ciclismo, vôlei e mais. Organizado pela comunidade adventista, aberto a todos. Cadastre seu grupo no mapa.">
@@ -21,8 +24,11 @@
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="movimenta7 — mapa de atividades físicas da comunidade no DF.">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="theme-color" content="#15803D">
+  <meta name="theme-color" content="#BEF264">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%83%3C/text%3E%3C/svg%3E">
+  <!-- O LCP desta página é a headline (texto, nunca imagem). Precarregar a fonte
+       de display encurta a janela em que ela aparece na fonte de sistema. -->
+  <link rel="preload" href="assets/fonts/bricolage-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/style.css">
   <script src="js/tema.js"></script>
 </head>
@@ -39,7 +45,7 @@
         <button id="botao-tema" class="botao-tema" type="button" aria-label="Mudar tema" aria-pressed="false">
           <span class="icone-tema" aria-hidden="true">◐</span>
         </button>
-        <a id="cta-topo" class="botao botao-primario oculto" href="#" target="_blank" rel="noopener">Cadastrar atividade</a>
+        <a id="cta-topo" class="botao botao-primario botao-topo oculto" href="#" target="_blank" rel="noopener">Cadastrar atividade</a>
       </div>
     </div>
   </header>
@@ -48,7 +54,7 @@
     <!-- HERO: a headline é o LCP (texto, nunca imagem) -->
     <section class="hero" aria-labelledby="titulo-hero">
       <p class="eyebrow">Comunidade adventista do DF · aberto a todos</p>
-      <h1 id="titulo-hero">movimenta7</h1>
+      <h1 id="titulo-hero"><span class="marca-traco">movimenta7</span></h1>
       <p class="hero-sub">
         Encontre uma atividade física perto de você, participe no seu ritmo e
         movimente-se em comunidade. <strong>Corrida, caminhada, ciclismo, vôlei e mais,
@@ -60,6 +66,19 @@
         <a class="botao botao-secundario" href="#secao-mapa">Ver o mapa</a>
       </div>
     </section>
+
+    <!-- MODALIDADES: mostram de relance que "atividade física" aqui é plural.
+         Não são filtros — filtro só faz sentido quando houver o que filtrar
+         (Fase 1). Prometer um controle que não controla nada é pior que não ter. -->
+    <ul class="chips" aria-label="Modalidades que já podem ser cadastradas">
+      <li class="chip"><span aria-hidden="true">🏃</span> Corrida</li>
+      <li class="chip"><span aria-hidden="true">🚶</span> Caminhada</li>
+      <li class="chip"><span aria-hidden="true">🚴</span> Ciclismo</li>
+      <li class="chip"><span aria-hidden="true">🏐</span> Vôlei</li>
+      <li class="chip"><span aria-hidden="true">💪</span> Funcional</li>
+      <li class="chip"><span aria-hidden="true">⛰️</span> Trilha</li>
+      <li class="chip"><span aria-hidden="true">➕</span> e o que seu grupo fizer</li>
+    </ul>
 
     <!-- 3 BULLETS DE VALOR -->
     <section class="valores" aria-label="Por que participar">
@@ -90,8 +109,10 @@
         <p id="mapa-status" class="mapa-status">Carregando o mapa…</p>
         <div id="faixa-nascendo" class="faixa-nascendo">🌱 O mapa está nascendo — cadastre seu grupo e seja o primeiro pin da sua região.</div>
       </figure>
-      <p id="contador" class="contador" aria-live="polite"></p>
-      <p id="atualizado" class="atualizado oculto" aria-live="polite"></p>
+      <div class="linha-viva">
+        <p id="contador" class="contador" aria-live="polite"></p>
+        <p id="atualizado" class="atualizado oculto" aria-live="polite"></p>
+      </div>
       <p class="fonte-dados">Limites das regiões administrativas: IPEDF / SEDUH-GDF (camada Limite_RA_2019).
         Cada grupo é responsável pelas informações que cadastrou. Viu algo errado ou fora do lugar?
         <a id="link-denuncia" href="#" rel="noopener">Avise a organização</a> e nós tiramos do ar.</p>
@@ -100,14 +121,15 @@
     <!-- COMO FUNCIONA -->
     <section id="como-funciona" class="secao" aria-labelledby="titulo-como">
       <h2 id="titulo-como">Como funciona</h2>
+      <p class="secao-sub">Três passos, e o terceiro é com quem está procurando você.</p>
       <ol class="passos">
-        <li><strong>Cadastre a atividade do seu grupo</strong> — leva uns 2 minutos: modalidade, região,
+        <li><strong>Cadastre a atividade do seu grupo</strong> leva uns 2 minutos: modalidade, região,
           dia, horário, local público de encontro e o @ da rede social da igreja ou o link do
           Google Maps do lugar.</li>
-        <li><strong>Seu grupo entra no mapa sozinho</strong>, em cerca de 10 minutos. Não há fila de
+        <li><strong>Seu grupo entra no mapa sozinho</strong> em cerca de 10 minutos. Não há fila de
           aprovação: uma checagem automática confere que nenhum dado pessoal e nenhum link
           estranho passem, e é só isso que separa o cadastro do mapa.</li>
-        <li><strong>Quem está por perto encontra vocês</strong> — e fala com o grupo pela rede social
+        <li><strong>Quem está por perto encontra vocês</strong> e fala com o grupo pela rede social
           que vocês indicaram, ou aparece no local.</li>
       </ol>
       <p class="aviso-privacidade"><strong>Privacidade (LGPD):</strong> o movimenta7 é uma iniciativa

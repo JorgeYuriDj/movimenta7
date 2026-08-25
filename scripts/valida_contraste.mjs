@@ -20,17 +20,22 @@ function ratio(fg, bg) {
 // Pairs mirror css/style.css tokens. Keep in sync when editing the palette.
 const PAIRS = [
   // [label, fg, bg, minimum]
-  ["light: texto/fundo", "#1B1B18", "#FAFAF7", 4.5],
-  ["light: texto-2/fundo", "#57554E", "#FAFAF7", 4.5],
-  ["light: texto-3/fundo (meta, so texto grande/secundario)", "#757268", "#FAFAF7", 3.0],
-  ["light: verde-movimento como texto/fundo", "#15803D", "#FAFAF7", 4.5],
-  ["light: verde-movimento como texto/surface", "#15803D", "#FFFFFF", 4.5],
-  ["light: CTA texto branco/verde-movimento", "#FFFFFF", "#15803D", 4.5],
-  ["dark: texto/fundo", "#ECEAE4", "#101311", 4.5],
-  ["dark: texto-2/fundo", "#A9ADA6", "#101311", 4.5],
-  ["dark: verde-movimento claro como texto/fundo", "#5BC17D", "#101311", 4.5],
-  ["dark: verde claro como texto/surface", "#5BC17D", "#161A17", 4.5],
-  ["dark: CTA texto escuro/verde claro", "#0C1410", "#5BC17D", 4.5],
+  ["light: texto/fundo", "#12140F", "#F7F7F4", 4.5],
+  ["light: texto/surface-2 (chips, aviso)", "#12140F", "#EEEFE9", 4.5],
+  ["light: texto-2/fundo", "#55584E", "#F7F7F4", 4.5],
+  ["light: texto-2/surface-2 (corpo do aviso de privacidade)", "#55584E", "#EEEFE9", 4.5],
+  ["light: texto-3/fundo (meta, so texto grande/secundario)", "#74776C", "#F7F7F4", 3.0],
+  ["light: verde-marca como texto/fundo", "#0E7A3C", "#F7F7F4", 4.5],
+  ["light: verde-marca como texto/surface", "#0E7A3C", "#FFFFFF", 4.5],
+  ["light: CTA tinta/lima", "#10240F", "#BEF264", 4.5],
+  ["light: CTA tinta/lima-forte (hover)", "#10240F", "#A3E635", 4.5],
+  ["dark: texto/fundo", "#ECEFE6", "#0C0F0B", 4.5],
+  ["dark: texto-2/fundo", "#A7ADA0", "#0C0F0B", 4.5],
+  ["dark: texto-2/surface-2", "#A7ADA0", "#1A1F17", 4.5],
+  ["dark: texto-3/fundo (meta)", "#878D80", "#0C0F0B", 3.0],
+  ["dark: verde-marca claro como texto/fundo", "#5FD98B", "#0C0F0B", 4.5],
+  ["dark: verde claro como texto/surface", "#5FD98B", "#131711", 4.5],
+  ["dark: CTA tinta/lima (o lima nao muda no escuro)", "#10240F", "#BEF264", 4.5],
 ];
 
 let fail = 0;

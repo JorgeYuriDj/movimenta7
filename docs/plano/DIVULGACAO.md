@@ -50,8 +50,8 @@ Story: print do mapa + "o mapa das atividades físicas da comunidade adventista 
 cadastre o grupo da sua igreja, link na bio". Bio: o link do formulário.
 
 **Preview do link:** o que aparece quando o link é colado no WhatsApp é a primeira tela do produto.
-O site ainda não tem imagem de preview (`og:image` 1200×630) — sem ela o link aparece cru. Se você
-quiser, me peça antes de divulgar; é rápido.
+**Já existe** — `assets/og-image.png`, 1200×630, servida e conferida por HTTP em 25/08. Não precisa
+fazer nada.
 
 ## Canais e meta
 

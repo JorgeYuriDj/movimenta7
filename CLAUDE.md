@@ -63,6 +63,30 @@ Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorg
     é técnico e colou o caminho): ponha o texto na área de transferência dele com
     PowerShell `Set-Clipboard`.
 
+14. **Para disparar o CI de fora, `workflow_dispatch` — NUNCA `repository_dispatch`.**
+    Verificado na doc oficial do GitHub em 25/08/2026: `repository_dispatch` exige
+    **Contents: write**, que é permissão de EMPURRAR COMMIT — e aqui o repositório **é** o
+    site, então esse token, vazado, publica o que quiser no mapa. `workflow_dispatch` exige
+    só **Actions: write**, que sabe apenas rodar workflow que já existe. O `on:` do
+    `ci.yml:25` já tem `workflow_dispatch` — **não remover**: o gatilho do formulário
+    (`aoEnviarFormulario`, `scripts/criar_form.gs`) morre com HTTP 422 dentro da conta Google
+    do dono, onde ninguém aqui vê. Token mora nas Propriedades do Script, nunca no repo.
+
+15. **Coordenada só vale se estiver na URL — NUNCA no corpo da página do Google.**
+    Medido em 25/08/2026: "skate park samambaia" e "Catedral de Brasília" devolveram a
+    MESMA coordenada (-15.8793728,-48.1099776), porque o Google entrega página genérica a
+    robô. Ler o corpo fincaria todo grupo sem link resolvido no mesmo ponto — o bug original
+    disfarçado de precisão. Congelado em `tests/coordenadas.test.mjs`. Duas consequências:
+    (a) **quando o link e a região do formulário discordam, VALE O LINK** e a região é
+    corrigida (`publicar_snapshot.mjs`) — validar o link contra a região jogaria fora o dado
+    certo, que foi exatamente o caso dos grupos da 502 Sul cadastrados como Samambaia;
+    (b) **"dentro do DF" se decide por POLÍGONO** (`regiaoDaCoordenada` em
+    `scripts/coordenadas.mjs`), nunca pela caixa de `js/util.js` — a caixa inclui uma faixa
+    de Goiás, e Luziânia passava por ela.
+    ⚠️ **Qualquer resolução por rede (link curto, geocodificação) EXIGE cache antes de
+    entrar no pipeline**: o CI roda a cada 10 min e não commita de volta — sem cache são
+    ~7200 requisições/dia a um serviço de terceiro, o que é abuso e dá bloqueio.
+
 ## Revisão externa (Codex)
 Ciclo em marcos (fim Fase 1, fim Fase 2, antes da Fase 3): `_revisao_codex/PROMPT_ANALISE_SISTEMA.md`.
 Codex é READ-ONLY; quem roda é o dono; reconciliação achado-a-achado antes de aplicar.

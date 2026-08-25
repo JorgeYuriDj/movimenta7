@@ -102,13 +102,28 @@
     <!-- MAPA -->
     <section id="secao-mapa" class="secao" aria-labelledby="titulo-mapa">
       <h2 id="titulo-mapa">O mapa do movimento</h2>
-      <p class="secao-sub">Cada pin é um grupo real, com dia, horário e local. Toque num pin para
-        conhecer o grupo e falar com ele pela rede social da igreja.</p>
+      <p class="secao-sub">Cada pin é um grupo real, e o emoji diz de que atividade se trata.
+        Toque num pin para ver dia, horário e local, e falar com o grupo pela rede social da igreja.</p>
       <figure class="mapa-figura">
         <div id="mapa" class="mapa" aria-label="Mapa do Distrito Federal com os grupos de atividade física"></div>
         <p id="mapa-status" class="mapa-status">Carregando o mapa…</p>
         <div id="faixa-nascendo" class="faixa-nascendo">🌱 O mapa está nascendo — cadastre seu grupo e seja o primeiro pin da sua região.</div>
       </figure>
+      <!-- LEGENDA: o mapa passou a distinguir grupos por emoji, e informação dada
+           só por ícone não atende WCAG 1.4.1. Estática no HTML, e não desenhada
+           pelo JS, para continuar valendo se o Leaflet não carregar — e para
+           também responder "o que dá para cadastrar aqui?". -->
+      <ul class="chips chips--legenda" aria-label="O que cada emoji do mapa significa">
+        <li class="chip"><span aria-hidden="true">🏃</span> Corrida</li>
+        <li class="chip"><span aria-hidden="true">🚶</span> Caminhada</li>
+        <li class="chip"><span aria-hidden="true">🚴</span> Ciclismo</li>
+        <li class="chip"><span aria-hidden="true">🏐</span> Vôlei</li>
+        <li class="chip"><span aria-hidden="true">⚽</span> Futebol</li>
+        <li class="chip"><span aria-hidden="true">💪</span> Funcional</li>
+        <li class="chip"><span aria-hidden="true">⛰️</span> Trilhas</li>
+        <li class="chip"><span aria-hidden="true">🏊</span> Natação</li>
+        <li class="chip"><span aria-hidden="true">🤸</span> Outra</li>
+      </ul>
       <div class="linha-viva">
         <p id="contador" class="contador" aria-live="polite"></p>
         <p id="atualizado" class="atualizado oculto" aria-live="polite"></p>

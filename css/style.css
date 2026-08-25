@@ -404,6 +404,57 @@ h3 { font-size: 1.15rem; }
    and wrap instead of stretching the balloon past the phone screen. */
 .popup-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
 
+/* ---------- pins do mapa ---------- */
+/* O emoji NÃO vem do JavaScript: js/app.js escolhe só a classe (pinModalidade,
+   em js/util.js) e o glifo entra por ::before, aqui. O motivo é a regra 1 do
+   projeto — o Leaflet renderiza a opção `html` de um divIcon com innerHTML, e
+   nada neste site chega ao DOM como HTML cru (ADR-0004). Um nome de classe
+   mantém a regra sem abrir exceção "mas essa string é nossa".
+
+   Cores: reaproveita --surface e --brand, que o gate de contraste já valida
+   como par nos dois temas ("verde-marca como texto/surface"). Nenhum token
+   novo — por isso PAIRS em scripts/valida_contraste.mjs não muda. */
+.pin-mov {
+  --pin-emoji: "🤸";
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  background: var(--surface);
+  border: 2px solid var(--brand);
+  border-radius: 50%;
+  box-shadow: var(--sombra-alta);
+  font-size: 19px; line-height: 1;
+  /* As duas famílias self-hosted são subset latin e não têm emoji: aqui a fonte
+     é a do sistema, de propósito. */
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  transition: transform 160ms var(--entrada);
+}
+.pin-mov::before { content: var(--pin-emoji); }
+.pin-mov:hover { transform: scale(1.15); }
+.pin-mov:focus-visible { outline: 3px solid var(--foco); outline-offset: 3px; }
+
+/* Um emoji por modalidade do formulário. Os mesmos glifos das cápsulas do topo,
+   para o site não usar dois desenhos para a mesma coisa. Mexeu aqui? A lista
+   equivalente é PINS_CONHECIDOS em js/util.js, e tests/util.test.mjs reprova se
+   as duas saírem de sincronia. */
+.pin-mov--corrida   { --pin-emoji: "🏃"; }
+.pin-mov--caminhada { --pin-emoji: "🚶"; }
+.pin-mov--ciclismo  { --pin-emoji: "🚴"; }
+.pin-mov--volei     { --pin-emoji: "🏐"; }
+.pin-mov--futebol   { --pin-emoji: "⚽"; }
+.pin-mov--funcional { --pin-emoji: "💪"; }
+.pin-mov--trilhas   { --pin-emoji: "⛰️"; }
+.pin-mov--natacao   { --pin-emoji: "🏊"; }
+.pin-mov--outra     { --pin-emoji: "🤸"; }
+
+/* Legenda: um mapa cujos pins são emoji precisa dizer o que cada emoji quer
+   dizer — e informação transmitida só por ícone não passa em WCAG 1.4.1. É HTML
+   estático, não desenhado pelo JS, para continuar legível se o mapa não carregar. */
+.chips--legenda {
+  justify-content: flex-start; max-width: none;
+  margin: 18px 0 0; padding: 0;
+}
+.chips--legenda .chip { min-height: 36px; padding: 7px 13px; font-size: 14px; }
+
 /* ---------- como funciona ---------- */
 
 .passos {

@@ -139,6 +139,46 @@ export function cleanField(v) {
     .slice(0, MAX_FIELD);
 }
 
+/* ---------- pin emoji, by modality ----------
+   A pin says WHAT happens there before it is tapped: on a map of the whole DF,
+   a screen of identical green dots forces a tap per group just to find out
+   whether it is a run or a volleyball game.
+
+   What travels from here to the browser is a SLUG, never an emoji: the glyph
+   itself lives in css/style.css (.pin-mov--<slug>), so no emoji is ever written
+   into the marker as HTML. Leaflet's L.divIcon renders its `html` option with
+   innerHTML, and this project's rule is textContent always, innerHTML never
+   (ADR-0004) — a class name keeps that rule intact without an exception for
+   "but it is our own string".
+
+   The slug IS the accent-stripped modality, and the set below has to stay equal
+   to the options the form offers in scripts/criar_form.gs. Both directions are
+   frozen by tests/util.test.mjs: a modality with no pin, and a pin with no CSS
+   rule, are the same silent failure — every group drawn with the fallback. */
+export const PINS_CONHECIDOS = new Set([
+  "corrida", "caminhada", "ciclismo", "volei", "futebol", "funcional", "trilhas", "natacao",
+]);
+/** Used for "Outra" and for anything the form starts offering before we style it. */
+export const PIN_PADRAO = "outra";
+
+const semAcento = (s) => String(s ?? "")
+  .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+/**
+ * Picks the pin for a group: the first modality that has one.
+ *
+ * Groups check several boxes ("Corrida, Caminhada"), and a pin can only show
+ * one thing. First-listed wins because that is the order the form presents, so
+ * the choice is at least predictable; the popup still lists every modality.
+ */
+export function pinModalidade(modalidades) {
+  for (const m of Array.isArray(modalidades) ? modalidades : []) {
+    const slug = semAcento(m);
+    if (PINS_CONHECIDOS.has(slug)) return slug;
+  }
+  return PIN_PADRAO;
+}
+
 /**
  * "há 8 minutos", "há 3 horas", "há 2 dias" — the freshness seal.
  *

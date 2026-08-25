@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   safeUrl, cleanField, parseSnapshot, descreveIdade,
   linkRedeSocial, linkMapa, MAX_FIELD, MAX_RECORDS,
+  pinModalidade, PINS_CONHECIDOS, PIN_PADRAO,
 } from "../js/util.js";
 
 test("safeUrl accepts http(s) only", () => {
@@ -148,4 +150,60 @@ test("cleanField strips invisibles BEFORE the cut, not after", () => {
   // visible name would be truncated to nothing.
   const entrada = "​".repeat(MAX_FIELD) + "Grupo de Caminhada";
   assert.equal(cleanField(entrada), "Grupo de Caminhada");
+});
+
+/* ---------- pins por modalidade ----------
+   The emoji pin is split across three files on purpose (js/util.js picks a
+   slug, css/style.css holds the glyph, scripts/criar_form.gs offers the
+   modality), and nothing in the browser complains when they disagree: a slug
+   with no CSS rule just renders the fallback, so EVERY group would silently
+   come out as the same generic pin. These tests are the only thing that reads
+   the three lists together. */
+
+test("pinModalidade picks the first modality that has a pin", () => {
+  assert.equal(pinModalidade(["Corrida", "Caminhada"]), "corrida");
+  assert.equal(pinModalidade(["Caminhada", "Corrida"]), "caminhada");
+});
+
+test("pinModalidade ignores accents and case, like the rest of the pipeline", () => {
+  assert.equal(pinModalidade(["Vôlei"]), "volei");
+  assert.equal(pinModalidade(["NATAÇÃO"]), "natacao");
+  assert.equal(pinModalidade([" ciclismo "]), "ciclismo");
+});
+
+test("an unknown or missing modality still gets a pin, never a crash", () => {
+  assert.equal(pinModalidade(["Xadrez"]), PIN_PADRAO);
+  assert.equal(pinModalidade(["Outra"]), PIN_PADRAO);
+  assert.equal(pinModalidade([]), PIN_PADRAO);
+  assert.equal(pinModalidade(null), PIN_PADRAO);
+  assert.equal(pinModalidade("Corrida"), PIN_PADRAO); // a string is not the list
+});
+
+test("every pin slug has its emoji in css/style.css", () => {
+  const css = readFileSync(new URL("../css/style.css", import.meta.url), "utf8");
+  const semRegra = [...PINS_CONHECIDOS, PIN_PADRAO]
+    .filter((slug) => {
+      // Plain string walk, not a regex: the slug is interpolated into the
+      // pattern, and one escaping mistake here turns the gate into a test that
+      // passes on an empty stylesheet.
+      const at = css.indexOf(`.pin-mov--${slug}`);
+      if (at === -1) return true;
+      return !css.slice(at, css.indexOf("}", at)).includes("--pin-emoji");
+    });
+  assert.deepEqual(semRegra, [],
+    `sem emoji no CSS (o grupo sairia com o pin generico): ${semRegra.join(", ")}`);
+});
+
+test("every modality the form offers has its own pin", () => {
+  const gs = readFileSync(new URL("../scripts/criar_form.gs", import.meta.url), "utf8");
+  // The checkbox question built from TITULOS.modalidades, and its options.
+  const bloco = gs.match(/setTitle\(TITULOS\.modalidades\)[\s\S]*?setChoiceValues\(\[([^\]]*)\]/);
+  assert.ok(bloco, "nao achei as opcoes de modalidade em scripts/criar_form.gs");
+  const opcoes = [...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.ok(opcoes.length >= 8, `so achei ${opcoes.length} modalidades — a regex saiu do lugar`);
+
+  // "Outra" is meant to land on the fallback; everything else must be its own.
+  const genericas = opcoes.filter((o) => o !== "Outra" && pinModalidade([o]) === PIN_PADRAO);
+  assert.deepEqual(genericas, [],
+    `o formulario oferece modalidades sem pin proprio: ${genericas.join(", ")}`);
 });

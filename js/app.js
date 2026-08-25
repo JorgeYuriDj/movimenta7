@@ -11,7 +11,7 @@
    ADR-0006 no human reads a submission before it is drawn here.
    ============================================================ */
 
-import { safeUrl, parseSnapshot, descreveIdade } from "./util.js";
+import { safeUrl, parseSnapshot, descreveIdade, pinModalidade } from "./util.js";
 
 const CFG = window.MOV7_CONFIG || {};
 const URLS = {
@@ -247,12 +247,46 @@ function popupFor(rec) {
   return box;
 }
 
+/* Screen-reader label for a pin. The emoji is decorative — it repeats, in one
+   glyph, something the popup already says in words — so what assistive tech
+   announces is the sentence, never "runner emoji". */
+function rotuloPin(rec) {
+  const modal = rec.modalidades.join(", ");
+  return [rec.grupo, modal, rec.regiao].filter(Boolean).join(" — ");
+}
+
+/* Pins carry the modality as an emoji.
+   The glyph is NOT written here: L.divIcon renders its `html` option through
+   innerHTML, so passing text — even our own — would open the one door this
+   project keeps shut (ADR-0004, and scripts/valida_popup.mjs freezes it). We
+   pass a CLASS NAME instead and css/style.css puts the emoji in ::before, which
+   the HTML parser never sees. `html` is deliberately left unset: Leaflet's
+   default is `false`, which it renders as an empty string.
+
+   A circle centred on the point, not a needle: the coordinate is the centroid
+   of the administrative region, not the group's address, so a pin that appears
+   to point AT a spot would be claiming a precision the data does not have. */
 function drawPins(L, map) {
   for (const rec of RECORDS) {
     if (rec.lat == null || rec.lon == null) continue;
-    L.circleMarker([rec.lat, rec.lon], {
-      radius: 9, weight: 2, color: "#15803D", fillColor: "#15803D", fillOpacity: 0.55,
+    const icone = L.divIcon({
+      className: "pin-mov pin-mov--" + pinModalidade(rec.modalidades),
+      iconSize: [38, 38],
+      iconAnchor: [19, 19],   // centre of the circle sits on the coordinate
+      popupAnchor: [0, -18],  // balloon opens above it, never over it
+    });
+    const marcador = L.marker([rec.lat, rec.lon], {
+      icon: icone,
+      title: rec.grupo,     // native hover label; set as a property, not parsed
+      riseOnHover: true,    // overlapping pins in one region: the hovered one wins
     }).addTo(map).bindPopup(popupFor(rec));
+
+    // setAttribute takes text, never markup — same guarantee as textContent.
+    const el = marcador.getElement();
+    if (el) {
+      el.setAttribute("role", "img");
+      el.setAttribute("aria-label", rotuloPin(rec));
+    }
   }
 }
 

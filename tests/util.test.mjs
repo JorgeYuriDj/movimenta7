@@ -106,6 +106,8 @@ test("linkMapa accepts the format the Google Maps share button produces", () => 
   // This is what "Compartilhar" gives you on a phone, so it is the format most
   // people will paste. An earlier version of this rule rejected it.
   assert.equal(linkMapa("https://maps.app.goo.gl/abc123"), "https://maps.app.goo.gl/abc123");
+  assert.equal(linkMapa("https://share.google/FfiPZmaScAgrNXWab"),
+    "https://share.google/FfiPZmaScAgrNXWab");
   assert.equal(linkMapa("https://maps.google.com/?q=Parque"), "https://maps.google.com/?q=Parque");
   assert.equal(linkMapa("https://goo.gl/maps/xyz"), "https://goo.gl/maps/xyz");
   assert.equal(linkMapa("https://www.openstreetmap.org/#map=15"), "https://www.openstreetmap.org/#map=15");
@@ -137,6 +139,10 @@ test("linkMapa removes dispensable query/hash data and upgrades known hosts", ()
     "https://maps.app.goo.gl/abc123",
   );
   assert.equal(
+    linkMapa("http://share.google/FfiPZmaScAgrNXWab?tracker=x#segredo"),
+    "https://share.google/FfiPZmaScAgrNXWab",
+  );
+  assert.equal(
     linkMapa("https://www.google.com/maps/place/Parque?entry=ttu&segredo=joao%40exemplo.org#61999990000"),
     "https://www.google.com/maps/place/Parque",
   );
@@ -166,6 +172,8 @@ test("linkMapa refuses Google pages that are not maps", () => {
   assert.equal(linkMapa("https://drive.google.com/file/d/1"), "");
   assert.equal(linkMapa("https://goo.gl/xyz"), "");
   assert.equal(linkMapa("https://maps.app.goo.gl.exemplo-malicioso.com/a"), "");
+  assert.equal(linkMapa("https://share.google.exemplo-malicioso.com/FfiPZmaScAgrNXWab"), "");
+  assert.equal(linkMapa("https://share.google/images/FfiPZmaScAgrNXWab"), "");
   assert.equal(linkMapa("https://sites.google.com/maps/viewer"), "");
   assert.equal(linkMapa("https://www.google.com:443/maps/place/Parque"), "");
 });

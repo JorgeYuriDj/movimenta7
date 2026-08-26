@@ -82,7 +82,7 @@ export const HOSTS_REDE_SOCIAL = [
    Google catalogue hosts require /maps; shorteners require their token shape;
    query/hash payloads are reduced to what a route actually needs. */
 export const HOSTS_MAPA_DEDICADOS = [
-  "maps.google.com", "maps.google.com.br", "maps.app.goo.gl",
+  "maps.google.com", "maps.google.com.br", "maps.app.goo.gl", "share.google",
   "openstreetmap.org", "www.openstreetmap.org", "osm.org", "www.osm.org",
 ];
 export const HOSTS_MAPA_COM_CAMINHO = [
@@ -317,7 +317,14 @@ export function linkMapa(v) {
 
   const host = p.hostname.toLowerCase();
   const caminhoMaps = /^\/maps(?:\/|$)/.test(p.pathname);
-  if (host === "maps.app.goo.gl") {
+  if (host === "share.google") {
+    // The Google app now also emits share.google/<token>. It is a general
+    // shortener, not a Maps-only host, so this is only a syntactic admission:
+    // ingestion follows it and quarantines the record unless the final Google
+    // destination proves it represents a place.
+    if (!/^\/[A-Za-z0-9_-]{8,128}\/?$/.test(p.pathname)) return "";
+    p.search = ""; p.hash = "";
+  } else if (host === "maps.app.goo.gl") {
     if (!/^\/[A-Za-z0-9_-]+\/?$/.test(p.pathname)) return "";
     p.search = ""; p.hash = ""; // the path token is the whole short link
   } else if (host === "goo.gl") {

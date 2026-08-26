@@ -69,6 +69,16 @@ test("rede social e rota sao obrigatorias no snapshot publico", () => {
   assert.match(erros, /mapa: nao pode ser vazio/);
 });
 
+test("share.google nunca chega sem resolucao ao snapshot publico", () => {
+  const erros = validarSnapshot(snapshot([registroValido({
+    mapa: "https://share.google/FfiPZmaScAgrNXWab",
+  })])).join("\n");
+  assert.match(erros, /share\.google precisa estar resolvido/);
+  assert.deepEqual(validarSnapshot(snapshot([registroValido({
+    mapa: "https://www.google.com/maps/search/?api=1&query=Skatepark+Samambaia",
+  })])), []);
+});
+
 test("recusa item vazio, texto nao normalizado e PII dentro de lista", () => {
   const erros = validarSnapshot(snapshot([registroValido({
     grupo: "  Grupo  com  espaco  ",

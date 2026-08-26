@@ -95,6 +95,9 @@ test("a excecao de coordenadas nao vira excecao de PII dentro do link de mapa", 
 test("o gate exige a forma canonica que a ingestao grava", () => {
   assert.equal(linkNaoPermitido("mapa", "https://maps.app.goo.gl/abc?g_st=ic"), true);
   assert.equal(linkNaoPermitido("mapa", "https://maps.app.goo.gl/abc"), false);
+  assert.equal(linkNaoPermitido("mapa", "https://share.google/FfiPZmaScAgrNXWab"), false,
+    "a entrada curta e validada pela resolucao assincrona antes do snapshot");
+  assert.equal(linkNaoPermitido("mapa", "https://share.google/FfiPZmaScAgrNXWab?tracker=x"), true);
   assert.equal(linkNaoPermitido("rede_social", "http://instagram.com/grupo?utm_source=x"), true);
   assert.equal(linkNaoPermitido("rede_social", "https://instagram.com/grupo"), false);
 });

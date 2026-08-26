@@ -110,6 +110,13 @@ export function validarSnapshot(doc) {
         if (typeof v !== "string") erros.push(`${prefixo}.${k}: deve ser texto`);
         else if (!v) erros.push(`${prefixo}.${k}: nao pode ser vazio`);
         else if (v.length > MAX_URL) erros.push(`${prefixo}.${k}: excede ${MAX_URL} caracteres`);
+        else if (k === "mapa") {
+          try {
+            if (new URL(v).hostname === "share.google") {
+              erros.push(`${prefixo}.mapa: share.google precisa estar resolvido antes do snapshot`);
+            }
+          } catch (e) { /* CHECAGENS_DE_VALOR reports the invalid link below */ }
+        }
       } else if (LIMITES_LISTA.has(k)) {
         if (!Array.isArray(v)) {
           erros.push(`${prefixo}.${k}: deve ser uma lista`);

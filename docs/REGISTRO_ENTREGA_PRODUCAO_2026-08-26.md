@@ -22,7 +22,8 @@ Evidências da entrega:
 
 - PR principal: [#1 — entrega mapa automático seguro](https://github.com/JorgeYuriDj/movimenta7/pull/1), merge `29ad63b`.
 - PR do incidente visual: [#2 — corrige carregamento do mapa](https://github.com/JorgeYuriDj/movimenta7/pull/2), merge `3ff4d2b`.
-- Suíte final: **137/137 testes**, contraste e gate anti-HTML cru aprovados.
+- Suíte final, após suporte seguro a `share.google`: **142/142 testes**, contraste e gate
+  anti-HTML cru aprovados.
 - QA e CodeQL aprovados antes das duas mesclas.
 - Envio real do Form disparou `workflow_dispatch`; o snapshot passou de 1 para 2 registros.
 - Chrome limpo em produção confirmou `leaflet-container`, mapa no estado `pronto`, dois grupos e
@@ -129,6 +130,7 @@ respostas cruas não devem estar nele.
 | Origem ausente podia publicar mapa vazio com CI verde | ingestão antiga saía com sucesso quando faltava configuração | feed obrigatório e erro estrutural fail-closed | contrato e Environment secrets obrigatórios |
 | Aba aberta não via cadastro novo | snapshot era buscado somente no boot | polling compartilhado por minuto, foco/visibilidade e ciclo curto após cadastro | teste de contrato do frontend |
 | Falha do snapshot parecia “mapa sem grupos” | estados vazio e indisponível eram misturados | estados separados, botão de tentar, lista preservada | UI usa `aria-live`, `aria-busy` e mensagens honestas |
+| Link copiado pelo aplicativo Google (`share.google/...`) não entrou | a allowlist conhecia o compartilhamento próprio do Maps, mas não o encurtador geral do aplicativo Google | seguir somente redirects Google e converter resultados comprovados de local em URL canônica do Maps | destino externo, artigo, imagem, metadata e `share.google` não resolvido são recusados; exemplo real e cache cobertos por testes |
 
 O incidente do SRI mostrou duas regras práticas: **segurança que bloqueia é melhor que segurança
 decorativa** e **teste que só inspeciona texto não substitui um navegador real**. O site degradou

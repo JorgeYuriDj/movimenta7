@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   coordenadaDeUrl, resolverCoordenada, regiaoDaCoordenada, dentroDoDF,
-  coordenadasCompartilhadas,
+  coordenadasCompartilhadas, resolverCompartilhamentoGoogle,
 } from "../scripts/coordenadas.mjs";
 
 const GEO = JSON.parse(readFileSync(new URL("../data/ra_df.geojson", import.meta.url), "utf8"));
@@ -83,6 +83,53 @@ test("a short link is followed until a URL names the position", () => {
   return resolverCoordenada("https://maps.app.goo.gl/xyz", {
     buscar: async (u) => rota[u] || semSalto,
   }).then((r) => assert.deepEqual(r, { lat: -15.79, lon: -47.88, fonte: "lugar" }));
+});
+
+test("a share.google place is proven and converted to a canonical Maps route", async () => {
+  const inicial = "https://share.google/FfiPZmaScAgrNXWab";
+  const intermediario = "https://www.google.com/share.google?q=FfiPZmaScAgrNXWab";
+  const destino = "https://www.google.com/search?kgmid=%2Fg%2F11c5h30rlp" +
+    "&q=Skatepark+Samambaia&source=sh%2Fx%2Floc%2Fact%2Fm1%2F2&utm_source=tracker";
+  const rota = {
+    [inicial]: salto(intermediario),
+    [intermediario]: salto(destino),
+  };
+  const chamadas = [];
+  const r = await resolverCompartilhamentoGoogle(inicial, {
+    buscar: async (url) => { chamadas.push(url); return rota[url] || semSalto; },
+  });
+  assert.deepEqual(r, {
+    mapa: "https://www.google.com/maps/search/?api=1&query=Skatepark+Samambaia",
+  });
+  assert.deepEqual(chamadas, [inicial, intermediario]);
+});
+
+test("share.google never becomes a general-purpose or unsafe redirect", async () => {
+  const inicial = "https://share.google/FfiPZmaScAgrNXWab";
+  const intermediario = "https://www.google.com/share.google?q=FfiPZmaScAgrNXWab";
+  for (const destino of [
+    "https://example.com/artigo",
+    "https://169.254.169.254/latest/meta-data",
+    "https://www.google.com/search?q=artigo&source=sh/x/web",
+    "https://www.google.com/search?q=Parque&source=sh/x/loc/act/m1/2",
+  ]) {
+    const chamadas = [];
+    const r = await resolverCompartilhamentoGoogle(inicial, {
+      buscar: async (url) => {
+        chamadas.push(url);
+        return url === inicial ? salto(intermediario) : salto(destino);
+      },
+    });
+    assert.equal(r, null, destino);
+    assert.deepEqual(chamadas, [inicial, intermediario]);
+  }
+
+  let chamadas = 0;
+  assert.equal(await resolverCompartilhamentoGoogle(
+    "https://share.google/images/FfiPZmaScAgrNXWab",
+    { buscar: async () => { chamadas++; return semSalto; } },
+  ), null);
+  assert.equal(chamadas, 0, "um formato nao permitido consultou a rede");
 });
 
 test("real Google Maps URL shapes remain accepted by the network resolver", async () => {
@@ -324,7 +371,7 @@ test("a registration with a search link keeps no position at all", async () => {
 
 test("a short Maps link is resolved once and reused from the private cache", async () => {
   const { completarCoordenadas } = await import("../scripts/ingerir_csv.mjs");
-  const cache = { versao: 1, itens: {} };
+  const cache = { versao: 2, itens: {} };
   let chamadas = 0;
   const buscar = async () => {
     chamadas++;
@@ -343,9 +390,73 @@ test("a short Maps link is resolved once and reused from the private cache", asy
   assert.equal(chamadas, 1, "o mesmo link voltou a consultar o Google");
 });
 
+test("a share.google registration is kept only after its place destination is proven", async () => {
+  const { completarCoordenadas, registrosPublicaveis } =
+    await import("../scripts/ingerir_csv.mjs");
+  const colunas = "grupo,organizacao,regiao,modalidades,dias,horario,local," +
+    "rede_social,mapa,orientacao_profissional,custo,publico,remover";
+  const inicial = "https://share.google/FfiPZmaScAgrNXWab";
+  const csv = `${colunas}\n"Grupo","IASD","Samambaia","Corrida","Segunda","19h",` +
+    `"Parque","@grupo","${inicial}","Encontro","Gratuito","Todos",""\n`;
+  const registros = registrosPublicaveis(csv);
+  assert.equal(registros[0].mapa, inicial, "a entrada foi recusada antes de poder ser comprovada");
+
+  const intermediario = "https://www.google.com/share.google?q=FfiPZmaScAgrNXWab";
+  const destino = "https://www.google.com/search?kgmid=%2Fg%2F11c5h30rlp" +
+    "&q=Skatepark+Samambaia&source=sh%2Fx%2Floc%2Fact%2Fm1%2F2";
+  let chamadas = 0;
+  const resolucao = await completarCoordenadas(registros, {
+    cache: { versao: 2, itens: {} },
+    buscar: async (url) => {
+      chamadas++;
+      if (url === inicial) return salto(intermediario);
+      if (url === intermediario) return salto(destino);
+      return semSalto;
+    },
+    agora: () => "2026-08-26T04:00:00.000Z",
+  });
+  assert.equal(registros.length, 1);
+  assert.equal(registros[0].mapa,
+    "https://www.google.com/maps/search/?api=1&query=Skatepark+Samambaia");
+  assert.equal(chamadas, 2);
+
+  const repetido = [{ grupo: "Outro", mapa: inicial }];
+  await completarCoordenadas(repetido, { cache: resolucao.cache, buscar: async () => {
+    chamadas++; return semSalto;
+  } });
+  assert.equal(repetido[0].mapa,
+    "https://www.google.com/maps/search/?api=1&query=Skatepark+Samambaia");
+  assert.equal(chamadas, 2, "o destino share.google comprovado nao veio do cache");
+});
+
+test("a generic share.google destination is quarantined without blocking other groups", async () => {
+  const { completarCoordenadas } = await import("../scripts/ingerir_csv.mjs");
+  const token = "https://share.google/LinkGenerico123";
+  const registros = [
+    { grupo: "Recusado", mapa: token },
+    { grupo: "Preservado", mapa: "https://www.google.com/maps?q=Parque" },
+  ];
+  const avisos = [];
+  const anterior = console.warn;
+  console.warn = (msg) => avisos.push(String(msg));
+  try {
+    await completarCoordenadas(registros, {
+      cache: { versao: 2, itens: {} },
+      buscar: async (url) => url === token
+        ? salto("https://www.google.com/share.google?q=LinkGenerico123")
+        : salto("https://example.com/artigo"),
+      agora: () => "2026-08-26T04:00:00.000Z",
+    });
+  } finally { console.warn = anterior; }
+  assert.deepEqual(registros.map((r) => r.grupo), ["Preservado"]);
+  assert.deepEqual(avisos, [
+    "AVISO: 1 cadastro(s) com share.google ficaram de fora porque o destino nao comprovou ser um local do Google.",
+  ], "o log publico precisa ser generico, sem repetir o link recusado");
+});
+
 test("a transient short-link failure expires instead of making the pin approximate forever", async () => {
   const { completarCoordenadas } = await import("../scripts/ingerir_csv.mjs");
-  const cache = { versao: 1, itens: {} };
+  const cache = { versao: 2, itens: {} };
   let chamadas = 0;
   const falha = async () => { chamadas++; return semSalto; };
   const link = "https://maps.app.goo.gl/transitorio";

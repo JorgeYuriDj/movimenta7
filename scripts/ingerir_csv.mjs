@@ -31,7 +31,9 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CAMPOS_PUBLICOS, CHECAGENS_DE_VALOR, isPrivateKey } from "./denylist.mjs";
 import { cleanField, linkMapa, linkRedeSocial, MAX_RECORDS, MAX_URL } from "../js/util.js";
-import { coordenadaDeUrl, resolverCoordenada } from "./coordenadas.mjs";
+import {
+  coordenadaDeUrl, resolverCoordenada, resolverCompartilhamentoGoogle,
+} from "./coordenadas.mjs";
 
 const OUT = new URL("../moderacao/aprovados.json", import.meta.url);
 const URL_FEED = process.env.PLANILHA_FEED_URL?.trim();
@@ -280,7 +282,7 @@ export function registrosPublicaveis(texto) {
 
 // ---------- short Google Maps links ----------
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const MAX_RESOLUCOES_POR_RODADA = 25;
 const CACHE_NEGATIVO_MS = 6 * 60 * 60 * 1000;
 
@@ -291,9 +293,14 @@ function chaveDoLink(url) {
 function linkCurtoDoMapa(url) {
   try {
     const p = new URL(String(url || ""));
-    return p.hostname === "maps.app.goo.gl" ||
+    return p.hostname === "share.google" || p.hostname === "maps.app.goo.gl" ||
       (p.hostname === "goo.gl" && p.pathname.startsWith("/maps/"));
   } catch (e) { return false; }
+}
+
+function ehShareGoogle(url) {
+  try { return new URL(String(url || "")).hostname === "share.google"; }
+  catch (e) { return false; }
 }
 
 function cacheVazio() {
@@ -312,11 +319,11 @@ export function lerCacheCoordenadas(path = CACHE_PATH) {
  * Resolves each opaque Maps share link at most once.
  *
  * The cache deliberately stores only a SHA-256 of the link plus its public
- * coordinate. It lives in the private Actions cache, never in Git history and
- * never in the Pages artifact. A negative result cools down for six hours, then
- * is retried: this avoids hammering a broken link without turning one transient
- * network failure into a permanently approximate pin. The per-run cap also
- * prevents form spam from causing hundreds of requests.
+ * coordinate and, for share.google, the canonical Maps destination proved by
+ * the redirect chain. It lives in the private Actions cache, never in Git
+ * history and never in the Pages artifact. A negative result cools down for six
+ * hours, then is retried. The per-run cap prevents form spam from causing
+ * hundreds of requests.
  */
 export async function completarCoordenadas(registros, {
   cache = cacheVazio(), buscar = fetch, limite = MAX_RESOLUCOES_POR_RODADA,
@@ -326,31 +333,78 @@ export async function completarCoordenadas(registros, {
   let consultas = 0;
   let alterado = false;
   let pendentes = 0;
+  const recusadosShare = new Set();
 
   for (const rec of registros) {
     if (Number.isFinite(rec?.lat) && Number.isFinite(rec?.lon)) continue;
     if (!linkCurtoDoMapa(rec?.mapa)) continue;
 
     const chave = chaveDoLink(rec.mapa);
+    const shareGoogle = ehShareGoogle(rec.mapa);
     const salvo = cache.itens[chave];
     if (salvo) {
+      if (shareGoogle && typeof salvo.mapa === "string" && salvo.mapa) {
+        rec.mapa = salvo.mapa;
+        if (Number.isFinite(salvo.lat) && Number.isFinite(salvo.lon)) {
+          rec.lat = salvo.lat;
+          rec.lon = salvo.lon;
+        }
+        continue;
+      }
       if (Number.isFinite(salvo.lat) && Number.isFinite(salvo.lon)) {
         rec.lat = salvo.lat;
         rec.lon = salvo.lon;
         continue;
       }
       const idade = Date.parse(agora()) - Date.parse(salvo.verificado_em);
-      if (Number.isFinite(idade) && idade >= 0 && idade < CACHE_NEGATIVO_MS) continue;
+      if (Number.isFinite(idade) && idade >= 0 && idade < CACHE_NEGATIVO_MS) {
+        if (shareGoogle) recusadosShare.add(rec);
+        continue;
+      }
     }
 
-    if (consultas >= limite) { pendentes++; continue; }
+    if (consultas >= limite) {
+      pendentes++;
+      // share.google is a general shortener. Until its destination is proven to
+      // be a place, fail closed instead of publishing a possible arbitrary URL.
+      if (shareGoogle) recusadosShare.add(rec);
+      continue;
+    }
     consultas++;
-    const pos = await resolverCoordenada(rec.mapa, { buscar });
-    cache.itens[chave] = pos
-      ? { lat: pos.lat, lon: pos.lon, verificado_em: agora() }
-      : { lat: null, lon: null, verificado_em: agora() };
+    const resolvido = shareGoogle
+      ? await resolverCompartilhamentoGoogle(rec.mapa, { buscar })
+      : await resolverCoordenada(rec.mapa, { buscar });
+    if (shareGoogle) {
+      cache.itens[chave] = resolvido
+        ? {
+            mapa: resolvido.mapa,
+            lat: Number.isFinite(resolvido.lat) ? resolvido.lat : null,
+            lon: Number.isFinite(resolvido.lon) ? resolvido.lon : null,
+            verificado_em: agora(),
+          }
+        : { mapa: null, lat: null, lon: null, verificado_em: agora() };
+      if (resolvido) {
+        rec.mapa = resolvido.mapa;
+        if (Number.isFinite(resolvido.lat) && Number.isFinite(resolvido.lon)) {
+          rec.lat = resolvido.lat;
+          rec.lon = resolvido.lon;
+        }
+      } else recusadosShare.add(rec);
+    } else {
+      cache.itens[chave] = resolvido
+        ? { lat: resolvido.lat, lon: resolvido.lon, verificado_em: agora() }
+        : { lat: null, lon: null, verificado_em: agora() };
+      if (resolvido) { rec.lat = resolvido.lat; rec.lon = resolvido.lon; }
+    }
     alterado = true;
-    if (pos) { rec.lat = pos.lat; rec.lon = pos.lon; }
+  }
+
+  if (recusadosShare.size) {
+    for (let i = registros.length - 1; i >= 0; i--) {
+      if (recusadosShare.has(registros[i])) registros.splice(i, 1);
+    }
+    console.warn(`AVISO: ${recusadosShare.size} cadastro(s) com share.google ficaram de fora ` +
+      `porque o destino nao comprovou ser um local do Google.`);
   }
 
   if (pendentes) {

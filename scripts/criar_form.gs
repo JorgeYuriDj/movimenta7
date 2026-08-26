@@ -76,7 +76,7 @@ var AJUDA_REDE_SOCIAL =
   'Informe um perfil público da igreja ou do grupo.';
 var AJUDA_MAPA =
   'No app do Google Maps: procure o lugar, toque em Compartilhar e cole o ' +
-  'endereço aqui (fica parecido com maps.app.goo.gl/...). Use o local do ENCONTRO ou o da ' +
+  'endereço aqui (pode começar com maps.app.goo.gl/ ou share.google/). Use o local do ENCONTRO ou o da ' +
   'igreja — nunca a casa de alguém. Este link é obrigatório para publicar o ponto certo.';
 var AJUDA_PEDIDO_PRIVADO = 'Se for correção, escreva o dado certo. O pedido fica privado.';
 

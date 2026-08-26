@@ -28,6 +28,9 @@ Também foram observados dois problemas operacionais:
   25/08/2026;
 - links curtos do Google Maps não carregam coordenadas no texto original e precisam de uma
   resolução de rede, que não pode se repetir a cada execução.
+- `share.google` é um encurtador geral do aplicativo Google: é aceito como entrada, mas só vira
+  rota pública quando a cadeia permanece no Google e comprova um resultado de local; páginas e
+  imagens compartilhadas pelo mesmo domínio ficam em quarentena.
 
 ## Decisão 1 — A planilha nunca é publicada na web
 

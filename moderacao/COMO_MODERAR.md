@@ -38,7 +38,9 @@ ou for inválido, o cadastro inteiro não vira pin nem item da lista. Os destino
 
 - **rede social:** Instagram, Facebook, Threads, YouTube, TikTok, Twitter/X e Strava; um `@`
   simples vira perfil do Instagram;
-- **mapa:** Google Maps e OpenStreetMap nos hosts e caminhos definidos pela allowlist.
+- **mapa:** Google Maps, `maps.app.goo.gl`, compartilhamentos `share.google` comprovados como local
+  e OpenStreetMap nos hosts e caminhos definidos pela allowlist. Como `share.google` também encurta
+  páginas comuns, o pipeline segue os redirecionamentos e só publica quando o destino é um lugar.
 
 WhatsApp não é aceito: o telefone fica embutido na URL.
 

@@ -31,6 +31,8 @@
  * Someone pasting a link to another city cannot drag a pin off to Goiás.
  */
 
+import { linkMapa } from "../js/util.js";
+
 /* ---------- geometry ----------
    Lifted out of publicar_snapshot.mjs, which now imports from here. Two copies
    of a point-in-polygon test in one repository is one copy too many: they would
@@ -194,6 +196,108 @@ function urlGoogleMapsParaRede(valor, base) {
     return /^\/maps\/[A-Za-z0-9_-]+\/?$/.test(p.pathname) ? p.href : "";
   }
   return "";
+}
+
+/** Initial Google-app short link. The host is general-purpose; destination
+ * validation happens after every redirect below. */
+function urlShareGoogleInicial(valor) {
+  if (temPortaExplicita(valor)) return "";
+  let p;
+  try { p = new URL(String(valor ?? "")); } catch (e) { return ""; }
+  if (p.protocol !== "https:" || p.hostname !== "share.google" ||
+      p.username || p.password || p.port || p.search || p.hash) return "";
+  return /^\/[A-Za-z0-9_-]{8,128}\/?$/.test(p.pathname) ? p.href : "";
+}
+
+function tokenShareGoogle(url) {
+  try { return new URL(url).pathname.split("/").filter(Boolean)[0] || ""; }
+  catch (e) { return ""; }
+}
+
+/** The first redirect observed from share.google. It may carry only the exact
+ * opaque token from the initial URL; accepting an arbitrary Google endpoint
+ * here would turn this into a general redirect follower. */
+function intermediarioShareGoogle(valor, base, token) {
+  if (temPortaExplicita(valor)) return "";
+  let p;
+  try { p = new URL(String(valor ?? ""), base); } catch (e) { return ""; }
+  if (p.protocol !== "https:" || p.username || p.password || p.port || p.hash) return "";
+  const host = p.hostname.toLowerCase();
+  if (!HOSTS_GOOGLE_MAPS.has(host) || p.pathname !== "/share.google") return "";
+  const params = [...p.searchParams];
+  return params.length === 1 && params[0][0] === "q" && params[0][1] === token
+    ? p.href : "";
+}
+
+/**
+ * Google-app place shares currently finish on a Google Search place result,
+ * identified by a Knowledge Graph place id and source=sh/x/loc/.... Convert
+ * that result to a clean Maps search URL. A generic article/image share lacks
+ * this contract and is rejected.
+ */
+function mapaDaBuscaCompartilhada(valor, base) {
+  if (temPortaExplicita(valor)) return "";
+  let p;
+  try { p = new URL(String(valor ?? ""), base); } catch (e) { return ""; }
+  if (p.protocol !== "https:" || p.username || p.password || p.port || p.hash) return "";
+  const host = p.hostname.toLowerCase();
+  if (!HOSTS_GOOGLE_MAPS.has(host) || p.pathname !== "/search") return "";
+
+  const consulta = String(p.searchParams.get("q") || "").trim();
+  const kgmid = String(p.searchParams.get("kgmid") || "");
+  const origem = String(p.searchParams.get("source") || "");
+  if (!consulta || consulta.length > 240 ||
+      !/^\/g\/[A-Za-z0-9_-]{3,128}$/.test(kgmid) ||
+      !/^sh\/x\/loc(?:\/|$)/.test(origem)) return "";
+
+  const mapa = new URL("https://www.google.com/maps/search/");
+  mapa.searchParams.set("api", "1");
+  mapa.searchParams.set("query", consulta);
+  return linkMapa(mapa.href);
+}
+
+/**
+ * Resolves the Google app's general share.google shortener into a proven Maps
+ * destination. Only redirect headers are read; the page body is never used.
+ * Returns a canonical Maps URL and, when present in that URL, its coordinate.
+ */
+export async function resolverCompartilhamentoGoogle(url, {
+  buscar = fetch, maxHops = 4, timeoutMs = 8000,
+} = {}) {
+  let atual = urlShareGoogleInicial(url);
+  if (!atual) return null;
+  const token = tokenShareGoogle(atual);
+  const signal = typeof AbortSignal !== "undefined" &&
+    typeof AbortSignal.timeout === "function" && timeoutMs > 0
+    ? AbortSignal.timeout(timeoutMs)
+    : undefined;
+
+  for (let i = 0; i < maxHops; i++) {
+    let resp;
+    try {
+      const opcoes = { redirect: "manual" };
+      if (signal) opcoes.signal = signal;
+      resp = await buscar(atual, opcoes);
+    } catch (e) { return null; }
+
+    const proximo = resp?.headers?.get?.("location") || "";
+    if (!proximo) return null;
+
+    const intermediario = intermediarioShareGoogle(proximo, atual, token);
+    if (intermediario) { atual = intermediario; continue; }
+
+    const destinoMaps = urlGoogleMapsParaRede(proximo, atual);
+    if (destinoMaps) {
+      const mapa = linkMapa(destinoMaps);
+      if (!mapa) return null;
+      const pos = coordenadaDeUrl(mapa);
+      return pos ? { mapa, lat: pos.lat, lon: pos.lon } : { mapa };
+    }
+
+    const mapa = mapaDaBuscaCompartilhada(proximo, atual);
+    return mapa ? { mapa } : null;
+  }
+  return null;
 }
 
 /**

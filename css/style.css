@@ -233,9 +233,17 @@ button.acao-card { background: var(--surface); }
 .pin-mov--ciclismo { --pin-emoji: "🚴"; }
 .pin-mov--volei { --pin-emoji: "🏐"; }
 .pin-mov--futebol { --pin-emoji: "⚽"; }
+.pin-mov--futsal { --pin-emoji: "⚽"; }
+.pin-mov--basquete { --pin-emoji: "🏀"; }
+.pin-mov--handebol { --pin-emoji: "🤾"; }
 .pin-mov--funcional { --pin-emoji: "💪"; }
+.pin-mov--musculacao { --pin-emoji: "🏋️"; }
+.pin-mov--danca { --pin-emoji: "💃"; }
+.pin-mov--lutas { --pin-emoji: "🥋"; }
 .pin-mov--trilhas { --pin-emoji: "⛰️"; }
 .pin-mov--natacao { --pin-emoji: "🏊"; }
+.pin-mov--skate { --pin-emoji: "🛹"; }
+.pin-mov--yoga { --pin-emoji: "🧘"; }
 .pin-mov--outra { --pin-emoji: "🤸"; }
 
 .chamada-cadastro { width: min(1140px, calc(100% - 40px)); margin: 34px auto; padding: clamp(28px, 5vw, 54px); display: grid; grid-template-columns: minmax(0, 1.5fr) auto; align-items: center; gap: 32px; border-radius: 28px; background: var(--text); color: var(--bg); box-shadow: var(--sombra-alta); }

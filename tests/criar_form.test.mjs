@@ -44,7 +44,9 @@ function ambienteFalso() {
   };
 
   const novoItem = (tipo) => {
-    const estado = { tipo, titulo: "", obrigatorio: false, escolhas: [], ajuda: "" };
+    const estado = {
+      tipo, titulo: "", obrigatorio: false, escolhas: [], ajuda: "", outraHabilitada: false,
+    };
     registro.itens.push(estado);
     const self = {
       setTitle(titulo) {
@@ -54,11 +56,13 @@ function ambienteFalso() {
       },
       setRequired(valor = true) { estado.obrigatorio = Boolean(valor); return self; },
       setChoiceValues(valores) { estado.escolhas = Array.from(valores); return self; },
+      showOtherOption(valor) { estado.outraHabilitada = Boolean(valor); return self; },
       setHelpText(texto) { estado.ajuda = texto; return self; },
       setChoices(escolhas) { estado.escolhas = Array.from(escolhas); return self; },
       createChoice(rotulo, destino) { return { rotulo, destino }; },
       getTitle() { return estado.titulo; },
       asMultipleChoiceItem() { return self; },
+      asCheckboxItem() { return self; },
       asParagraphTextItem() { return self; },
       asTextItem() { return self; },
       _estado: estado,
@@ -157,6 +161,7 @@ function ambienteFalso() {
     DestinationType: { SPREADSHEET: "SPREADSHEET" },
     PageNavigationType: { CONTINUE: "CONTINUE", SUBMIT: "SUBMIT" },
     ItemType: {
+      CHECKBOX: "CHECKBOX",
       MULTIPLE_CHOICE: "MULTIPLE_CHOICE",
       PAGE_BREAK: "PAGE_BREAK",
       PARAGRAPH_TEXT: "PARAGRAPH",
@@ -459,6 +464,11 @@ test("feed setup requires a strong secret and migrates the existing form copy id
   local.registro.limitaUmaResposta = true;
   local.registro.publicado = false;
   const grupo = local.registro.itens.find((item) => item.titulo === local.contexto.TITULOS.grupo);
+  const modalidades = local.registro.itens.find(
+    (item) => item.titulo === local.contexto.TITULOS.modalidades,
+  );
+  modalidades.escolhas = ["Corrida", "Outra"];
+  modalidades.outraHabilitada = false;
   grupo.ajuda = "NAO_MEXER_EM_CAMPO_NAO_ALVO";
   const paginaCadastro = local.registro.paginas.find(
     (pagina) => pagina.titulo === local.contexto.TITULO_PAGINA_CADASTRO,
@@ -496,6 +506,9 @@ test("feed setup requires a strong secret and migrates the existing form copy id
   assert.equal(local.registro.coletaEmail, false, "a migracao nao pode coletar e-mail");
   assert.equal(local.registro.limitaUmaResposta, false, "o cadastro nao pode exigir login por limite de resposta");
   assert.equal(local.registro.publicado, true, "o link publico do formulario deve continuar publicado");
+  assert.deepEqual(modalidades.escolhas, Array.from(local.contexto.MODALIDADES_COMUNS));
+  assert.equal(modalidades.outraHabilitada, true,
+    "a pessoa precisa conseguir escrever uma modalidade que nao esta na lista");
   assert.equal(
     local.registro.itens.find((item) => item.titulo === local.contexto.TITULOS.rede_social).ajuda,
     local.contexto.AJUDA_REDE_SOCIAL,

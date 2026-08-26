@@ -48,6 +48,8 @@ Essa função não apaga resposta nem troca segredo existente. Ela:
 - identifica e guarda a planilha correta;
 - confirma que o segredo criado manualmente existe, sem gerar nem exibir seu valor;
 - torna obrigatórios os links do Google Maps e da rede social no formulário;
+- atualiza as modalidades comuns e ativa **Outro**, para a pessoa escrever qualquer esporte sem
+  perder seu nome no mapa;
 - atualiza a mensagem final do cadastro.
 
 O mesmo segredo terá exatamente três localizações autorizadas: o gerenciador de senhas, a

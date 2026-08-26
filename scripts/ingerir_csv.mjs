@@ -32,7 +32,8 @@ import { fileURLToPath } from "node:url";
 import { CAMPOS_PUBLICOS, CHECAGENS_DE_VALOR, isPrivateKey } from "./denylist.mjs";
 import { cleanField, linkMapa, linkRedeSocial, MAX_RECORDS, MAX_URL } from "../js/util.js";
 import {
-  coordenadaDeUrl, resolverCoordenada, resolverCompartilhamentoGoogle,
+  coordenadaDeUrl, geocodificarLocalPublico, resolverCoordenada,
+  resolverCompartilhamentoGoogle,
 } from "./coordenadas.mjs";
 
 const OUT = new URL("../moderacao/aprovados.json", import.meta.url);
@@ -282,7 +283,7 @@ export function registrosPublicaveis(texto) {
 
 // ---------- short Google Maps links ----------
 
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const MAX_RESOLUCOES_POR_RODADA = 25;
 const CACHE_NEGATIVO_MS = 6 * 60 * 60 * 1000;
 
@@ -328,12 +329,22 @@ export function lerCacheCoordenadas(path = CACHE_PATH) {
 export async function completarCoordenadas(registros, {
   cache = cacheVazio(), buscar = fetch, limite = MAX_RESOLUCOES_POR_RODADA,
   agora = () => new Date().toISOString(),
+  relogio = () => Date.now(),
+  pausar = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
   if (!cache.itens || typeof cache.itens !== "object") cache = cacheVazio();
   let consultas = 0;
   let alterado = false;
   let pendentes = 0;
   const recusadosShare = new Set();
+  let ultimaConsultaNominatim = -Infinity;
+
+  const geocodificarComLimite = async (consulta, regiao) => {
+    const decorrido = relogio() - ultimaConsultaNominatim;
+    if (Number.isFinite(decorrido) && decorrido < 1000) await pausar(1000 - decorrido);
+    ultimaConsultaNominatim = relogio();
+    return geocodificarLocalPublico(consulta, regiao, { buscar });
+  };
 
   for (const rec of registros) {
     if (Number.isFinite(rec?.lat) && Number.isFinite(rec?.lon)) continue;
@@ -348,6 +359,18 @@ export async function completarCoordenadas(registros, {
         if (Number.isFinite(salvo.lat) && Number.isFinite(salvo.lon)) {
           rec.lat = salvo.lat;
           rec.lon = salvo.lon;
+          continue;
+        }
+        const idade = Date.parse(agora()) - Date.parse(salvo.verificado_em);
+        if (Number.isFinite(idade) && idade >= 0 && idade < CACHE_NEGATIVO_MS) continue;
+        if (salvo.consulta && consultas < limite) {
+          consultas++;
+          const pos = await geocodificarComLimite(salvo.consulta, rec.regiao);
+          salvo.lat = pos?.lat ?? null;
+          salvo.lon = pos?.lon ?? null;
+          salvo.verificado_em = agora();
+          alterado = true;
+          if (pos) { rec.lat = pos.lat; rec.lon = pos.lon; }
         }
         continue;
       }
@@ -375,9 +398,15 @@ export async function completarCoordenadas(registros, {
       ? await resolverCompartilhamentoGoogle(rec.mapa, { buscar })
       : await resolverCoordenada(rec.mapa, { buscar });
     if (shareGoogle) {
+      if (resolvido?.consulta &&
+          (!Number.isFinite(resolvido.lat) || !Number.isFinite(resolvido.lon))) {
+        const pos = await geocodificarComLimite(resolvido.consulta, rec.regiao);
+        if (pos) { resolvido.lat = pos.lat; resolvido.lon = pos.lon; }
+      }
       cache.itens[chave] = resolvido
         ? {
             mapa: resolvido.mapa,
+            consulta: resolvido.consulta || null,
             lat: Number.isFinite(resolvido.lat) ? resolvido.lat : null,
             lon: Number.isFinite(resolvido.lon) ? resolvido.lon : null,
             verificado_em: agora(),

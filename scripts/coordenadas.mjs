@@ -12,7 +12,8 @@
  * THREE LAYERS, BEST FIRST:
  *   1. the coordinate carried inside the Google Maps link the person pasted —
  *      exact, free, and needs no third-party service;
- *   2. (still to come) geocoding the typed place name;
+ *   2. geocoding the place name proven by a share.google location result,
+ *      bounded to the DF, rate-limited and cached;
  *   3. the region centroid, which stops being the answer and becomes the last
  *      resort it always should have been.
  *
@@ -256,6 +257,90 @@ function mapaDaBuscaCompartilhada(valor, base) {
   return linkMapa(mapa.href);
 }
 
+const TERMOS_GEOCODIFICACAO_IGNORADOS = new Set([
+  "a", "ao", "aos", "as", "da", "das", "de", "do", "dos", "e", "em",
+  "brasil", "distrito", "federal",
+]);
+
+function tokensGeograficos(valor) {
+  return String(valor ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/)
+    .filter((token) => token.length >= 2 && !TERMOS_GEOCODIFICACAO_IGNORADOS.has(token));
+}
+
+function resultadoCombinaComConsulta(consulta, displayName) {
+  const esperados = [...new Set(tokensGeograficos(consulta))];
+  if (esperados.length < 2) return false; // "Parque" sozinho nao identifica um lugar.
+  const encontrados = new Set(tokensGeograficos(displayName));
+  const acertos = esperados.filter((token) => encontrados.has(token)).length;
+  return acertos >= 2 && acertos / esperados.length >= 0.6;
+}
+
+/**
+ * Geocodes one already-proven public place name through the public Nominatim
+ * service. This is not autocomplete: it runs server-side only for share.google
+ * place links, with a fixed endpoint, DF bounds, an identifying User-Agent and
+ * a small response ceiling. The caller serializes requests to <= 1/s and keeps
+ * the result in the private persistent cache.
+ */
+export async function geocodificarLocalPublico(consulta, regiao, {
+  buscar = fetch, timeoutMs = 8000,
+} = {}) {
+  const nome = String(consulta ?? "").trim();
+  if (nome.length < 3 || nome.length > 240 || tokensGeograficos(nome).length < 2) return null;
+
+  const alvo = new URL("https://nominatim.openstreetmap.org/search");
+  alvo.searchParams.set("q", [nome, String(regiao ?? "").trim(), "Distrito Federal", "Brasil"]
+    .filter(Boolean).join(", "));
+  alvo.searchParams.set("format", "jsonv2");
+  alvo.searchParams.set("limit", "5");
+  alvo.searchParams.set("countrycodes", "br");
+  alvo.searchParams.set("viewbox", "-48.8,-15.0,-46.8,-16.6");
+  alvo.searchParams.set("bounded", "1");
+  alvo.searchParams.set("addressdetails", "1");
+  alvo.searchParams.set("dedupe", "1");
+
+  const signal = typeof AbortSignal !== "undefined" &&
+    typeof AbortSignal.timeout === "function" && timeoutMs > 0
+    ? AbortSignal.timeout(timeoutMs)
+    : undefined;
+  let resp;
+  try {
+    const opcoes = {
+      redirect: "error",
+      headers: {
+        accept: "application/json",
+        "accept-language": "pt-BR",
+        "user-agent": "movimenta7/1.0 (+https://jorgeyuridj.github.io/movimenta7/)",
+      },
+    };
+    if (signal) opcoes.signal = signal;
+    resp = await buscar(alvo.href, opcoes);
+  } catch (e) { return null; }
+  if (!resp?.ok) return null;
+
+  const MAX_RESPOSTA = 64 * 1024;
+  const declarado = Number(resp.headers?.get?.("content-length"));
+  if (Number.isFinite(declarado) && declarado > MAX_RESPOSTA) return null;
+  let bytes;
+  try { bytes = new Uint8Array(await resp.arrayBuffer()); } catch (e) { return null; }
+  if (bytes.byteLength > MAX_RESPOSTA) return null;
+
+  let resultados;
+  try { resultados = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+  catch (e) { return null; }
+  if (!Array.isArray(resultados)) return null;
+
+  for (const item of resultados) {
+    const lat = Number(item?.lat), lon = Number(item?.lon);
+    if (!coordenadaValida(lat, lon) || lat < -16.6 || lat > -15.0 || lon < -48.8 || lon > -46.8) continue;
+    if (String(item?.address?.country_code || "").toLowerCase() !== "br") continue;
+    if (!resultadoCombinaComConsulta(nome, item?.display_name)) continue;
+    return { lat, lon, fonte: "nominatim" };
+  }
+  return null;
+}
+
 /**
  * Resolves the Google app's general share.google shortener into a proven Maps
  * destination. Only redirect headers are read; the page body is never used.
@@ -295,7 +380,9 @@ export async function resolverCompartilhamentoGoogle(url, {
     }
 
     const mapa = mapaDaBuscaCompartilhada(proximo, atual);
-    return mapa ? { mapa } : null;
+    if (!mapa) return null;
+    const consulta = new URL(mapa).searchParams.get("query") || "";
+    return { mapa, consulta };
   }
   return null;
 }

@@ -99,14 +99,21 @@ vermelho preserva a versão anterior.
 
 ## Decisão 3 — Coordenada exata quando verificável; região quando não
 
-O link do Google Maps é obrigatório no formulário, mas só é considerado coordenada exata quando
-latitude e longitude aparecem na própria URL ou em uma URL de redirecionamento. O corpo HTML do
-Google nunca é lido: testes reais devolveram a mesma coordenada genérica para lugares diferentes.
+O link do Google Maps é obrigatório no formulário. Latitude e longitude presentes na própria URL
+ou em uma URL de redirecionamento continuam sendo a fonte preferida. O corpo HTML do Google nunca
+é lido: testes reais devolveram a mesma coordenada genérica para lugares diferentes.
+
+Quando um `share.google` comprova um resultado de **local**, mas a cadeia não contém coordenadas,
+o nome público desse lugar é pesquisado server-side no endpoint fixo do OpenStreetMap/Nominatim.
+A consulta é limitada ao DF e ao Brasil; exige pelo menos dois termos coincidentes no resultado;
+usa `User-Agent` identificável; roda no máximo uma vez por segundo; e fica no cache privado por
+hash. Isso não é autocomplete nem busca oferecida ao visitante. A atribuição OpenStreetMap já
+permanece visível no mapa.
 
 Links curtos são resolvidos com limite de redirecionamentos e tempo. O resultado fica em cache do
 GitHub Actions, indexado pelo hash SHA-256 do link; a URL crua não é gravada no cache. Falha de
-rede não impede o resto da publicação: o pin usa o ponto representativo da região e aparece como
-posição aproximada. Uma coordenada confirmada fora do polígono do DF coloca o cadastro inteiro
+rede ou ausência de correspondência confiável não impede o resto da publicação: o pin usa o ponto
+representativo da região e aparece como posição aproximada. Uma coordenada confirmada fora do polígono do DF coloca o cadastro inteiro
 em quarentena: não há rota, pin nem item na lista. Se link e região discordarem dentro do DF,
 prevalece a posição do link e o rótulo da região é corrigido.
 

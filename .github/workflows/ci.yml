@@ -98,7 +98,7 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html .nojekyll _site/
-          cp -r css js data assets _site/
+          cp -r css js data assets vendor _site/
           echo "--- publicado:" && find _site -type f | sort
 
       - name: Empacotar o site

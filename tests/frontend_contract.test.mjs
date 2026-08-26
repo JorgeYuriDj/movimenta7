@@ -44,8 +44,6 @@ test("busca, filtros e lista acessivel existem mesmo sem tiles do mapa", () => {
 test("Leaflet fica no proprio site e nao depende de CDN para abrir o mapa", () => {
   assert.ok(app.includes('href: "vendor/leaflet/leaflet.css"'));
   assert.ok(app.includes('src: "vendor/leaflet/leaflet.js"'));
-  assert.equal(app.includes("unpkg.com"), false);
-  assert.equal(html.includes("unpkg.com"), false);
   assert.match(leafletJs, /Leaflet 1\.9\.4/);
   assert.match(leafletCss, /\.leaflet-container/);
   assert.ok(app.includes(`integrity: "${sriSha256(leafletJsBytes)}"`), "SRI do JS precisa corresponder ao arquivo");

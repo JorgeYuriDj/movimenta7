@@ -60,6 +60,18 @@ var COLUNAS = [
   'local', 'rede_social', 'mapa', 'orientacao_profissional', 'custo', 'publico',
 ];
 
+/**
+ * Shortcuts for the most common activities. The native "Other" option stays
+ * enabled separately, so the list never becomes a catalogue that excludes a
+ * sport: the responder can write Jiu-jítsu, Muay Thai, Tênis, Xadrez etc. and
+ * that exact public activity name travels through the same sanitised field.
+ */
+var MODALIDADES_COMUNS = [
+  'Corrida', 'Caminhada', 'Ciclismo', 'Vôlei', 'Futebol', 'Futsal',
+  'Basquete', 'Handebol', 'Funcional', 'Musculação', 'Dança',
+  'Lutas / artes marciais', 'Trilhas', 'Natação', 'Skate / patins', 'Yoga',
+];
+
 var COL_REMOVER = 'remover';
 var TITULO_CONSENTIMENTO = 'Consentimento (LGPD)';
 var TITULO_ACAO = 'O que você quer fazer?';
@@ -101,6 +113,12 @@ function confirmacaoDoFormulario_() {
     'https://jorgeyuridj.github.io/movimenta7/#secao-mapa';
 }
 
+function configurarModalidades_(item) {
+  return item.setRequired(true)
+    .setChoiceValues(MODALIDADES_COMUNS)
+    .showOtherOption(true);
+}
+
 function criarFormMovimenta7() {
   var form = FormApp.create('movimenta7 — Cadastro de atividade física');
   form.setDescription(descricaoDoFormulario_());
@@ -129,8 +147,7 @@ function criarFormMovimenta7() {
     'SIA','Sobradinho','Sobradinho II','Sol Nascente/Pôr do Sol','Sudoeste/Octogonal',
     'Taguatinga','Varjão','Vicente Pires','Arapoanga','Água Quente','Entorno (fora do DF)']);
 
-  form.addCheckboxItem().setTitle(TITULOS.modalidades).setRequired(true).setChoiceValues([
-    'Corrida','Caminhada','Ciclismo','Vôlei','Futebol','Funcional','Trilhas','Natação','Outra']);
+  configurarModalidades_(form.addCheckboxItem().setTitle(TITULOS.modalidades));
 
   form.addCheckboxItem().setTitle(TITULOS.dias).setRequired(true).setChoiceValues([
     'Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado (após o pôr do sol)']);
@@ -495,6 +512,13 @@ function migrarCopyDoFormulario_(form) {
     if (escolhas[j].getTitle() === TITULO_CONSENTIMENTO) {
       escolhas[j].asMultipleChoiceItem().setRequired(true)
         .setChoiceValues([TEXTO_CONSENTIMENTO]);
+    }
+  }
+
+  var caixas = form.getItems(FormApp.ItemType.CHECKBOX);
+  for (var c = 0; c < caixas.length; c++) {
+    if (caixas[c].getTitle() === TITULOS.modalidades) {
+      configurarModalidades_(caixas[c].asCheckboxItem());
     }
   }
 

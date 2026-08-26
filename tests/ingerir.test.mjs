@@ -74,9 +74,10 @@ test("a coluna antiga 'aprovado' e aceita e ignorada", () => {
 });
 
 test("campos de lista viram array", () => {
-  const csv = [CAB, linha({ modalidades: "Caminhada, Corrida", dias: "Segunda, Quarta" })].join("\n");
+  const csv = [CAB, linha({ modalidades: "Basquete, Muay Thai", dias: "Segunda, Quarta" })].join("\n");
   const r = registrosPublicaveis(csv)[0];
-  assert.deepEqual(r.modalidades, ["Caminhada", "Corrida"]);
+  assert.deepEqual(r.modalidades, ["Basquete", "Muay Thai"],
+    "a modalidade escrita em Outro precisa chegar ao mapa com seu nome real");
   assert.deepEqual(r.dias, ["Segunda", "Quarta"]);
 });
 

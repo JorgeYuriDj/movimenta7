@@ -24,7 +24,7 @@ const CAMPOS_TEXTO = new Set([
 ]);
 const CAMPOS_LINK = new Set(["rede_social", "mapa"]);
 const LIMITES_LISTA = new Map([
-  ["modalidades", 9],
+  ["modalidades", 20],
   ["dias", 7],
   ["publico", 6],
 ]);

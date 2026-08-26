@@ -13,7 +13,12 @@ const LEAFLET = {
   css: { id: "mov7-leaflet-css", href: "vendor/leaflet/leaflet.css", integrity: "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" },
   js: { id: "mov7-leaflet-js", src: "vendor/leaflet/leaflet.js", integrity: "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" },
 };
-const EMOJI = { corrida: "🏃", caminhada: "🚶", ciclismo: "🚴", volei: "🏐", futebol: "⚽", funcional: "💪", trilhas: "⛰️", natacao: "🏊", outra: "🤸" };
+const EMOJI = {
+  corrida: "🏃", caminhada: "🚶", ciclismo: "🚴", volei: "🏐", futebol: "⚽",
+  futsal: "⚽", basquete: "🏀", handebol: "🤾", funcional: "💪",
+  musculacao: "🏋️", danca: "💃", lutas: "🥋", trilhas: "⛰️",
+  natacao: "🏊", skate: "🛹", yoga: "🧘", outra: "🤸",
+};
 
 const $ = (sel) => document.querySelector(sel);
 const criar = (tag, classe, texto) => {

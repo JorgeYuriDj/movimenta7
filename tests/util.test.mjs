@@ -270,6 +270,9 @@ test("pinModalidade ignores accents and case, like the rest of the pipeline", ()
   assert.equal(pinModalidade(["Vôlei"]), "volei");
   assert.equal(pinModalidade(["NATAÇÃO"]), "natacao");
   assert.equal(pinModalidade([" ciclismo "]), "ciclismo");
+  assert.equal(pinModalidade(["Lutas / artes marciais"]), "lutas");
+  assert.equal(pinModalidade(["Muay Thai"]), "lutas");
+  assert.equal(pinModalidade(["Skate / patins"]), "skate");
 });
 
 test("an unknown or missing modality still gets a pin, never a crash", () => {
@@ -297,16 +300,16 @@ test("every pin slug has its emoji in css/style.css", () => {
 
 test("every modality the form offers has its own pin", () => {
   const gs = readFileSync(new URL("../scripts/criar_form.gs", import.meta.url), "utf8");
-  // The checkbox question built from TITULOS.modalidades, and its options.
-  const bloco = gs.match(/setTitle\(TITULOS\.modalidades\)[\s\S]*?setChoiceValues\(\[([^\]]*)\]/);
-  assert.ok(bloco, "nao achei as opcoes de modalidade em scripts/criar_form.gs");
+  const bloco = gs.match(/var MODALIDADES_COMUNS\s*=\s*\[([^\]]*)\]/);
+  assert.ok(bloco, "nao achei MODALIDADES_COMUNS em scripts/criar_form.gs");
   const opcoes = [...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-  assert.ok(opcoes.length >= 8, `so achei ${opcoes.length} modalidades — a regex saiu do lugar`);
+  assert.ok(opcoes.length >= 16, `so achei ${opcoes.length} modalidades — a regex saiu do lugar`);
 
-  // "Outra" is meant to land on the fallback; everything else must be its own.
-  const genericas = opcoes.filter((o) => o !== "Outra" && pinModalidade([o]) === PIN_PADRAO);
+  const genericas = opcoes.filter((o) => pinModalidade([o]) === PIN_PADRAO);
   assert.deepEqual(genericas, [],
     `o formulario oferece modalidades sem pin proprio: ${genericas.join(", ")}`);
+  assert.match(gs, /configurarModalidades_[\s\S]*?showOtherOption\(true\)/,
+    "o formulario precisa aceitar qualquer outra modalidade pelo campo nativo");
 });
 
 /* Leaflet's stylesheet is fetched at runtime by js/app.js, so it lands in the

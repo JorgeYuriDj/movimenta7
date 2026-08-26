@@ -391,10 +391,20 @@ export function cleanField(v) {
    to the options the form offers in scripts/criar_form.gs. Both directions are
    frozen by tests/util.test.mjs: a modality with no pin, and a pin with no CSS
    rule, are the same silent failure — every group drawn with the fallback. */
-export const PINS_CONHECIDOS = new Set([
-  "corrida", "caminhada", "ciclismo", "volei", "futebol", "funcional", "trilhas", "natacao",
+const PIN_POR_MODALIDADE = new Map([
+  ["corrida", "corrida"], ["caminhada", "caminhada"], ["ciclismo", "ciclismo"],
+  ["volei", "volei"], ["futebol", "futebol"], ["futsal", "futsal"],
+  ["basquete", "basquete"], ["handebol", "handebol"], ["funcional", "funcional"],
+  ["musculacao", "musculacao"], ["danca", "danca"],
+  ["lutas / artes marciais", "lutas"], ["trilhas", "trilhas"],
+  ["natacao", "natacao"], ["skate / patins", "skate"], ["yoga", "yoga"],
+  // Frequent names typed through the native "Other" field still receive the
+  // right family icon; their original text remains untouched in the card.
+  ["jiu-jitsu", "lutas"], ["jiu jitsu", "lutas"], ["muay thai", "lutas"],
+  ["karate", "lutas"], ["judo", "lutas"], ["capoeira", "lutas"], ["boxe", "lutas"],
 ]);
-/** Used for "Outra" and for anything the form starts offering before we style it. */
+export const PINS_CONHECIDOS = new Set(PIN_POR_MODALIDADE.values());
+/** Used for any activity written through "Other" that has no dedicated family icon. */
 export const PIN_PADRAO = "outra";
 
 const semAcento = (s) => String(s ?? "")
@@ -409,8 +419,8 @@ const semAcento = (s) => String(s ?? "")
  */
 export function pinModalidade(modalidades) {
   for (const m of Array.isArray(modalidades) ? modalidades : []) {
-    const slug = semAcento(m);
-    if (PINS_CONHECIDOS.has(slug)) return slug;
+    const slug = PIN_POR_MODALIDADE.get(semAcento(m));
+    if (slug) return slug;
   }
   return PIN_PADRAO;
 }
@@ -476,7 +486,7 @@ export function parseSnapshot(j) {
       organizacao: cleanField(r.organizacao),
       regiao: cleanField(r.regiao),
       modalidades: (Array.isArray(r.modalidades) ? r.modalidades : [])
-        .slice(0, 9).map(cleanField).filter(Boolean),
+        .slice(0, 20).map(cleanField).filter(Boolean),
       dias: (Array.isArray(r.dias) ? r.dias : [])
         .slice(0, 7).map(cleanField).filter(Boolean),
       horario: cleanField(r.horario),

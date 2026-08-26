@@ -48,13 +48,13 @@ test("cada registro usa o esquema completo e tipos declarados", () => {
 test("limita texto, quantidade das listas e tamanho das URLs", () => {
   const erros = validarSnapshot(snapshot([registroValido({
     grupo: "x".repeat(MAX_FIELD + 1),
-    modalidades: Array.from({ length: 10 }, (_, i) => `Modalidade ${i}`),
+    modalidades: Array.from({ length: 21 }, (_, i) => `Modalidade ${i}`),
     dias: Array.from({ length: 8 }, (_, i) => `Dia ${i}`),
     publico: Array.from({ length: 7 }, (_, i) => `Publico ${i}`),
     rede_social: "https://www.instagram.com/" + "x".repeat(MAX_URL),
   })])).join("\n");
   assert.match(erros, /grupo: excede 120/);
-  assert.match(erros, /modalidades: excede 9 itens/);
+  assert.match(erros, /modalidades: excede 20 itens/);
   assert.match(erros, /dias: excede 7 itens/);
   assert.match(erros, /publico: excede 6 itens/);
   assert.match(erros, /rede_social: excede 2048/);

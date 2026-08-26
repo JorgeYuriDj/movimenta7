@@ -15,10 +15,10 @@
  * public. This step's input is a file our own ingest just wrote, so anything
  * wrong here is a bug in us and deserves a red build.
  *
- * Coordinates: the form does not ask for them, so a group is placed at the
- * centroid of its administrative region, taken from the official IPEDF layer
- * (data/ra_df.geojson). Never hardcode coordinates (ADR-0003). Groups sharing
- * a region get a small deterministic offset so their pins do not overlap.
+ * Coordinates: a map link wins when it carries a position inside the DF. The
+ * region centroid is only the explicit, labelled fallback. Never hardcode
+ * coordinates (ADR-0003). Groups sharing a fallback region get a small
+ * deterministic offset so their pins do not overlap.
  *
  * Fail-closed: any private-looking field aborts the write (exit 1).
  *
@@ -98,7 +98,9 @@ const usoPorRegiao = new Map();
 const registros = [];
 
 aprovados.forEach((r, i) => {
-  const rotulo = `registro ${i + 1}` + (r?.grupo ? ` ("${r.grupo}")` : "");
+  // This log is public. Even a rejected group name/region can contain the PII
+  // or control text that caused the rejection, so identify rows only by index.
+  const rotulo = `registro ${i + 1}`;
   if (r == null || typeof r !== "object") { erros.push(`${rotulo}: nao e um objeto`); return; }
 
   for (const [k, v] of Object.entries(r)) {
@@ -112,6 +114,8 @@ aprovados.forEach((r, i) => {
   }
   if (!r.grupo) { erros.push(`${rotulo}: falta "grupo" (sem nome do grupo o site nao mostra)`); return; }
   if (!r.regiao) { erros.push(`${rotulo}: falta "regiao"`); return; }
+  if (!r.rede_social) { erros.push(`${rotulo}: falta "rede_social"`); return; }
+  if (!r.mapa) { erros.push(`${rotulo}: falta "mapa"`); return; }
 
   // Every public field is carried through. custo, publico and
   // orientacao_profissional used to be collected, validated — and then dropped
@@ -149,27 +153,27 @@ aprovados.forEach((r, i) => {
   const feicaoReal = temCoordenada ? regiaoDaCoordenada(lat, lon, geo) : "";
 
   if (temCoordenada && !feicaoReal) {
-    // Refusing it is the point: without this, one wrong link drags a pin to
-    // another state and the map claims a group meets there.
-    semCoordenada.push(`${rotulo}: a posicao do link cai FORA do DF e foi recusada — ` +
-      `o grupo entra no centro da regiao declarada, "${r.regiao}"`);
+    // This is one hostile/broken submission, not a structural failure. Keep it
+    // out without freezing every legitimate group already on the map.
+    semCoordenada.push(`${rotulo}: a posicao do link cai FORA do DF — cadastro ficou em quarentena`);
+    return;
   }
 
   if (temCoordenada && feicaoReal) {
-    rec.lat = lat; rec.lon = lon;
+    rec.lat = lat; rec.lon = lon; rec.posicao = "exata";
     const declarada = mapaRegioes.get(norm(r.regiao));
     if (declarada?.feicao && norm(declarada.feicao) !== norm(feicaoReal)) {
       const certa = rotuloPorFeicao.get(norm(feicaoReal));
       if (certa) {
-        semCoordenada.push(`${rotulo}: escolheu "${r.regiao}" no formulario, mas o link do mapa ` +
-          `aponta para ${certa} — vale o link, e a regiao foi corrigida`);
+        semCoordenada.push(`${rotulo}: a regiao declarada divergia do link do mapa — ` +
+          `vale o link, e a regiao foi corrigida`);
         rec.regiao = certa;
       } else {
         // The point is inside the DF but in a region data/regioes.json does not
         // list. Keeping the position and the declared label is the least-wrong
         // answer available: the pin is right, only its caption is approximate.
-        semCoordenada.push(`${rotulo}: o link cai em "${feicaoReal}", que nao esta em ` +
-          `data/regioes.json — pin mantido no lugar certo, regiao segue como "${r.regiao}"`);
+        semCoordenada.push(`${rotulo}: o link cai em uma feicao ainda ausente de ` +
+          `data/regioes.json — pin mantido no lugar certo, regiao declarada preservada`);
       }
     }
   } else {
@@ -177,18 +181,19 @@ aprovados.forEach((r, i) => {
     // nobody reads, so the group was counted and never drawn.
     const decl = mapaRegioes.get(norm(r.regiao));
     if (!decl) {
-      erros.push(`${rotulo}: regiao "${r.regiao}" nao esta declarada em data/regioes.json — ` +
-        `corrija o nome ou acrescente a regiao la (com a feicao correspondente, ou "sem_pin": true)`);
+      erros.push(`${rotulo}: regiao declarada nao consta em data/regioes.json — ` +
+        `corrija a linha privada ou acrescente a regiao ao contrato`);
       return;
     }
     const ra = decl.feicao ? regioes.get(norm(decl.feicao)) : null;
     if (!ra && !decl.sem_pin) {
-      erros.push(`${rotulo}: regiao "${r.regiao}" aponta para a feicao "${decl.feicao}", ` +
-        `que nao existe em data/ra_df.geojson — data/regioes.json esta fora de sincronia`);
+      erros.push(`${rotulo}: a feicao configurada para a regiao nao existe em ` +
+        `data/ra_df.geojson — data/regioes.json esta fora de sincronia`);
       return;
     }
     if (!ra) {
-      semCoordenada.push(`${rotulo}: "${r.regiao}" e declarada SEM pin de proposito — conta no total, fica fora do mapa`);
+      rec.posicao = "regiao";
+      semCoordenada.push(`${rotulo}: regiao declarada SEM pin de proposito — conta no total, fica fora do mapa`);
     } else {
       // deterministic fan-out (~250 m steps) so pins in the same region stay legible
       const n = usoPorRegiao.get(ra.nome) || 0;
@@ -196,6 +201,7 @@ aprovados.forEach((r, i) => {
       const ang = n * 2.39996, raio = n === 0 ? 0 : 0.0022 * Math.sqrt(n);
       rec.lat = +(ra.lat + raio * Math.sin(ang)).toFixed(6);
       rec.lon = +(ra.lon + raio * Math.cos(ang)).toFixed(6);
+      rec.posicao = "regiao";
     }
   }
   registros.push(rec);

@@ -2,42 +2,46 @@
  * movimenta7 — traz os cadastros da planilha para o site, SEM fila de aprovação.
  *
  * Desde ADR-0006 (25/08/2026) o dono não aprova cadastro a cadastro: quem
- * preenche o formulário entra no mapa na próxima rodada do CI (~10 min). O que
- * sobrou de controle é o contrário disto — a coluna `remover`, que tira do ar.
+ * preenche o formulário dispara o CI imediatamente (normalmente 1–2 min até a
+ * página perceber). O cron é só o fallback; `remover` tira a linha do ar.
  *
  * COMO O DADO VIAJA:
- *   formulário -> planilha de respostas
- *     -> aba PUBLICAR, só as colunas públicas
- *       -> publicada na web como CSV
- *         -> este script -> moderacao/aprovados.json -> publicar_snapshot.mjs
+ *   formulário -> planilha PRIVADA de respostas
+ *     -> Apps Script projeta somente as colunas de cadastro num feed autenticado
+ *       -> este script -> moderacao/aprovados.json -> publicar_snapshot.mjs
  *
- * O formulário deixou de coletar dado pessoal (nem nome, nem telefone), então
- * não existe mais coluna privada para vazar. Sobrou o risco de publicar a ABA
- * errada — a de respostas cruas, com carimbo de data/hora — e é isso que a
- * trava de coluna inesperada pega: ela ABORTA e nada é gravado.
+ * O formulário não pede dado pessoal, mas campo livre continua hostil. Por isso
+ * a planilha fica privada: o Apps Script projeta uma allowlist antes de o CI
+ * receber qualquer célula. A trava de schema confere essa projeção de novo.
  *
  * DUAS CLASSES DE ERRO, de propósito:
- *   - estrutural (CSV vazio, coluna inesperada, coluna faltando) -> ABORTA tudo.
- *     São sinais de que a planilha errada foi publicada.
+ *   - estrutural (feed vazio, coluna inesperada, coluna faltando) -> ABORTA tudo.
+ *     São sinais de endpoint errado, contrato antigo ou configuração quebrada.
  *   - de UM cadastro (dado pessoal digitado num campo, sem região, link fora da
  *     lista) -> pula SÓ aquele cadastro e segue. Sem revisão humana, abortar o
  *     build por causa de uma linha ruim entregaria a qualquer pessoa o poder de
  *     congelar o site inteiro preenchendo o formulário com lixo.
  *
- * Uso:  PLANILHA_CSV_URL="https://docs.google.com/.../pub?output=csv" node scripts/ingerir_csv.mjs
+ * Uso: PLANILHA_FEED_URL="https://script.google.com/macros/s/.../exec"
+ *      PLANILHA_FEED_TOKEN="segredo" node scripts/ingerir_csv.mjs
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CAMPOS_PUBLICOS, CHECAGENS_DE_VALOR, isPrivateKey } from "./denylist.mjs";
-import { linkMapa, linkRedeSocial, MAX_RECORDS } from "../js/util.js";
-import { coordenadaDeUrl, descartarCoordenadasRepetidas } from "./coordenadas.mjs";
+import { cleanField, linkMapa, linkRedeSocial, MAX_RECORDS, MAX_URL } from "../js/util.js";
+import { coordenadaDeUrl, resolverCoordenada } from "./coordenadas.mjs";
 
 const OUT = new URL("../moderacao/aprovados.json", import.meta.url);
-const URL_CSV = process.env.PLANILHA_CSV_URL?.trim();
+const URL_FEED = process.env.PLANILHA_FEED_URL?.trim();
+const TOKEN_FEED = process.env.PLANILHA_FEED_TOKEN?.trim();
+const CACHE_PATH = process.env.MOV7_GEOCACHE_PATH?.trim() ||
+  fileURLToPath(new URL("../.cache/geocache.json", import.meta.url));
 
 const fail = (msg) => { console.error("INGESTAO ABORTADA: " + msg); process.exit(1); };
 
-/** Colunas que o CSV precisa ter, com este nome exato. */
+/** Colunas que o envelope privado precisa ter, com este nome exato. */
 const COLUNAS = [
   "grupo", "organizacao", "regiao", "modalidades", "dias", "horario",
   "local", "rede_social", "mapa", "orientacao_profissional", "custo", "publico",
@@ -86,6 +90,30 @@ export function parseCSV(texto) {
   return linhas.filter((l) => l.some((c) => c.trim() !== ""));
 }
 
+/** Converte o envelope privado do Apps Script no mesmo CSV RFC-4180 do parser. */
+export function feedParaCSV(doc) {
+  if (!doc || doc.ok !== true || doc.schema_version !== 1) {
+    throw new Error("o feed privado nao confirmou o contrato schema_version=1");
+  }
+  if (!Array.isArray(doc.colunas) || !Array.isArray(doc.linhas)) {
+    throw new Error("o feed privado nao trouxe colunas e linhas");
+  }
+  if (doc.colunas.length > 32 || doc.linhas.length > 5000) {
+    throw new Error("o feed privado excedeu o limite estrutural");
+  }
+  const largura = doc.colunas.length;
+  if (!doc.linhas.every((l) => Array.isArray(l) && l.length === largura)) {
+    throw new Error("uma linha do feed privado tem largura diferente do cabecalho");
+  }
+  const celula = (v) => {
+    const s = String(v ?? "");
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [doc.colunas, ...doc.linhas]
+    .map((linha) => linha.map(celula).join(","))
+    .join("\n") + "\n";
+}
+
 const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
   .toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -112,7 +140,7 @@ const REGIOES = new Set(
  */
 export function registrosPublicaveis(texto) {
   const linhas = parseCSV(texto);
-  if (linhas.length === 0) fail("o CSV veio vazio — a planilha publicou alguma coisa?");
+  if (linhas.length === 0) fail("o feed veio vazio ou ilegivel");
 
   const cabecalho = linhas[0].map(norm);
 
@@ -121,12 +149,11 @@ export function registrosPublicaveis(texto) {
   const esperadas = new Set([...COLUNAS, ...CONTROLE]);
   const intrusas = cabecalho.filter((c) => c && !esperadas.has(c));
   if (intrusas.length) {
-    fail(`o CSV tem coluna(s) que nao deveriam existir: ${intrusas.join(", ")}.\n` +
-      `  Provavel causa: a planilha foi publicada como "Documento inteiro" em vez de so a aba PUBLICAR.\n` +
-      `  Va em Arquivo > Compartilhar > Publicar na web e escolha SO a aba PUBLICAR.`);
+    fail(`o feed tem ${intrusas.length} coluna(s) que nao deveriam existir.\n` +
+      `  Atualize e reimplante scripts/criar_form.gs. Nunca publique a planilha na web.`);
   }
   const faltando = COLUNAS.filter((c) => !cabecalho.includes(c));
-  if (faltando.length) fail(`faltam colunas no CSV: ${faltando.join(", ")}`);
+  if (faltando.length) fail(`faltam colunas no feed: ${faltando.join(", ")}`);
 
   const em = (linha, coluna) => (linha[cabecalho.indexOf(coluna)] ?? "").trim();
 
@@ -139,6 +166,7 @@ export function registrosPublicaveis(texto) {
     if (ehVerdadeiro(em(linha, "remover"))) return; // saída pedida: não é descarte
 
     const rec = {};
+    const linksInvalidos = [];
     for (const coluna of COLUNAS) {
       const valor = em(linha, coluna);
       if (!valor) continue;
@@ -147,32 +175,23 @@ export function registrosPublicaveis(texto) {
       // digitou. É isso que impede um telefone escrito no campo do Instagram de
       // ficar guardado em moderacao/aprovados.json, que é público.
       if (NORMALIZADORES[coluna]) {
-        const url = NORMALIZADORES[coluna](valor);
+        const url = NORMALIZADORES[coluna](valor.slice(0, MAX_URL + 1));
         if (!url) {
-          descartes.push(`linha ${nLinha}: "${coluna}" nao e um endereco aceito — ` +
-            `o grupo entra no mapa, so que sem esse link`);
+          linksInvalidos.push(coluna);
           continue;
         }
         rec[coluna] = url;
         continue;
       }
       rec[coluna] = LISTAS.has(coluna)
-        ? valor.split(",").map((s) => s.trim()).filter(Boolean)
-        : valor;
+        ? valor.split(",").map(cleanField).filter(Boolean)
+        : cleanField(valor);
     }
     // Redundante com publicar_snapshot.mjs de propósito: nenhum campo fora da
     // allowlist pode ser montado aqui, nem por engano de mapeamento. Continua
     // ABORTANDO porque só um erro em COLUNAS chega aqui — é bug nosso.
     for (const k of Object.keys(rec)) {
       if (!CAMPOS_PUBLICOS.has(k)) fail(`linha ${nLinha}: campo "${k}" nao e publico`);
-    }
-
-    if (!rec.grupo) { descartes.push(`linha ${nLinha}: sem nome de grupo`); return; }
-    if (!rec.regiao) { descartes.push(`linha ${nLinha}: sem regiao administrativa`); return; }
-    if (!REGIOES.has(norm(rec.regiao))) {
-      descartes.push(`linha ${nLinha}: regiao "${rec.regiao}" nao existe em data/regioes.json — ` +
-        `corrija na planilha ou acrescente a regiao la`);
-      return;
     }
 
     // Quarentena de privacidade, cadastro a cadastro. A mensagem diz a LINHA e o
@@ -189,6 +208,27 @@ export function registrosPublicaveis(texto) {
     }
     if (motivos.length) {
       descartes.push(`linha ${nLinha}: NAO publicada — ${[...new Set(motivos)].join("; ")}`);
+      return;
+    }
+
+    // Rede social e rota são o produto: sem uma delas o visitante não consegue
+    // conhecer o grupo ou chegar ao encontro. O Form exige ambas, e esta segunda
+    // barreira cobre respostas antigas, importações manuais e links adulterados.
+    for (const obrigatorio of ["rede_social", "mapa"]) {
+      if (!rec[obrigatorio] && !linksInvalidos.includes(obrigatorio)) linksInvalidos.push(obrigatorio);
+    }
+    if (linksInvalidos.length) {
+      descartes.push(`linha ${nLinha}: NAO publicada — link obrigatorio ausente ou invalido em ` +
+        [...new Set(linksInvalidos)].map((k) => `"${k}"`).join(" e "));
+      return;
+    }
+
+    if (!rec.grupo) { descartes.push(`linha ${nLinha}: sem nome de grupo`); return; }
+    if (!rec.regiao) { descartes.push(`linha ${nLinha}: sem regiao administrativa`); return; }
+    if (!REGIOES.has(norm(rec.regiao))) {
+      // Never echo the value: the rejected cell may itself be the sensitive
+      // text the pipeline is quarantining, while Actions logs are public.
+      descartes.push(`linha ${nLinha}: regiao administrativa desconhecida — corrija na planilha`);
       return;
     }
 
@@ -209,12 +249,9 @@ export function registrosPublicaveis(texto) {
      * fetched — a full google.com/maps/place/... URL names its coordinate in the
      * URL itself, so this costs one regular expression and no network at all.
      *
-     * A short maps.app.goo.gl link — what the Compartilhar button produces, and
-     * therefore the common case — carries NO coordinate and has to be followed
-     * first. That step is not wired in yet, on purpose: it would put an
-     * uncached request per group per run against Google into a pipeline that
-     * runs every ten minutes. Until then those groups keep falling back to the
-     * region centroid, which is what they did before, so nothing regresses.
+     * A short maps.app.goo.gl link — what Compartilhar normally produces — has
+     * no coordinate here. `completarCoordenadas` follows it after every row has
+     * passed the privacy gates, with timeout, per-run ceiling and private cache.
      *
      * Whatever comes out is still checked at publication: outside the DF is
      * refused, and a region that disagrees with the coordinate is corrected to
@@ -227,11 +264,6 @@ export function registrosPublicaveis(texto) {
 
     registros.push(rec);
   });
-
-  // Several groups on the exact same point means an upstream answered with a
-  // constant, not that they all meet in one spot. Measured on 25/08: Google
-  // serves a robot the same map for every query it will not resolve.
-  descartarCoordenadasRepetidas(registros).avisos.forEach((a) => descartes.push(a));
 
   descartes.forEach((d) => console.warn("AVISO: " + d));
 
@@ -246,52 +278,187 @@ export function registrosPublicaveis(texto) {
   return registros;
 }
 
+// ---------- short Google Maps links ----------
+
+const CACHE_VERSION = 1;
+const MAX_RESOLUCOES_POR_RODADA = 25;
+const CACHE_NEGATIVO_MS = 6 * 60 * 60 * 1000;
+
+function chaveDoLink(url) {
+  return createHash("sha256").update(String(url || "")).digest("hex");
+}
+
+function linkCurtoDoMapa(url) {
+  try {
+    const p = new URL(String(url || ""));
+    return p.hostname === "maps.app.goo.gl" ||
+      (p.hostname === "goo.gl" && p.pathname.startsWith("/maps/"));
+  } catch (e) { return false; }
+}
+
+function cacheVazio() {
+  return { versao: CACHE_VERSION, itens: {} };
+}
+
+export function lerCacheCoordenadas(path = CACHE_PATH) {
+  try {
+    const doc = JSON.parse(readFileSync(path, "utf8"));
+    if (doc?.versao === CACHE_VERSION && doc.itens && typeof doc.itens === "object") return doc;
+  } catch (e) { /* cache ausente/corrompido: a origem continua sendo o link */ }
+  return cacheVazio();
+}
+
+/**
+ * Resolves each opaque Maps share link at most once.
+ *
+ * The cache deliberately stores only a SHA-256 of the link plus its public
+ * coordinate. It lives in the private Actions cache, never in Git history and
+ * never in the Pages artifact. A negative result cools down for six hours, then
+ * is retried: this avoids hammering a broken link without turning one transient
+ * network failure into a permanently approximate pin. The per-run cap also
+ * prevents form spam from causing hundreds of requests.
+ */
+export async function completarCoordenadas(registros, {
+  cache = cacheVazio(), buscar = fetch, limite = MAX_RESOLUCOES_POR_RODADA,
+  agora = () => new Date().toISOString(),
+} = {}) {
+  if (!cache.itens || typeof cache.itens !== "object") cache = cacheVazio();
+  let consultas = 0;
+  let alterado = false;
+  let pendentes = 0;
+
+  for (const rec of registros) {
+    if (Number.isFinite(rec?.lat) && Number.isFinite(rec?.lon)) continue;
+    if (!linkCurtoDoMapa(rec?.mapa)) continue;
+
+    const chave = chaveDoLink(rec.mapa);
+    const salvo = cache.itens[chave];
+    if (salvo) {
+      if (Number.isFinite(salvo.lat) && Number.isFinite(salvo.lon)) {
+        rec.lat = salvo.lat;
+        rec.lon = salvo.lon;
+        continue;
+      }
+      const idade = Date.parse(agora()) - Date.parse(salvo.verificado_em);
+      if (Number.isFinite(idade) && idade >= 0 && idade < CACHE_NEGATIVO_MS) continue;
+    }
+
+    if (consultas >= limite) { pendentes++; continue; }
+    consultas++;
+    const pos = await resolverCoordenada(rec.mapa, { buscar });
+    cache.itens[chave] = pos
+      ? { lat: pos.lat, lon: pos.lon, verificado_em: agora() }
+      : { lat: null, lon: null, verificado_em: agora() };
+    alterado = true;
+    if (pos) { rec.lat = pos.lat; rec.lon = pos.lon; }
+  }
+
+  if (pendentes) {
+    console.warn(`AVISO: ${pendentes} link(s) curto(s) aguardam a proxima rodada; ` +
+      `o limite seguro e ${limite} resolucoes novas por execucao.`);
+  }
+  return { registros, cache, alterado, consultas, pendentes };
+}
+
+function gravarCacheCoordenadas(cache, path = CACHE_PATH) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(cache, null, 2) + "\n", { encoding: "utf-8" });
+  writeFileSync(path + ".changed", "changed\n", { encoding: "utf-8" });
+}
+
+/**
+ * Reads a fetch response with a real UTF-8 byte ceiling.
+ *
+ * `texto.length` counts UTF-16 code units, not network bytes, and checking it
+ * after `response.text()` has already allowed an unbounded response into RAM.
+ * The feed is tiny; two megabytes is a structural alarm, so stop the stream as
+ * soon as the ceiling is crossed and never include its contents in the error.
+ */
+export async function lerTextoLimitado(resp, limiteBytes = 2_000_000) {
+  if (!Number.isSafeInteger(limiteBytes) || limiteBytes < 1) {
+    throw new TypeError("limite de bytes invalido");
+  }
+
+  const declarado = Number(resp?.headers?.get?.("content-length"));
+  if (Number.isFinite(declarado) && declarado > limiteBytes) {
+    throw new Error("o feed privado passou do limite de bytes");
+  }
+
+  const reader = resp?.body?.getReader?.();
+  if (!reader) {
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+    if (bytes.byteLength > limiteBytes) throw new Error("o feed privado passou do limite de bytes");
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  }
+
+  const partes = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const parte = value instanceof Uint8Array ? value : new Uint8Array(value);
+    total += parte.byteLength;
+    if (total > limiteBytes) {
+      try { await reader.cancel(); } catch (e) { /* best effort */ }
+      throw new Error("o feed privado passou do limite de bytes");
+    }
+    partes.push(parte);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const parte of partes) { bytes.set(parte, offset); offset += parte.byteLength; }
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
 // ---------- execução ----------
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  if (!URL_CSV) {
-    // Ainda não configurado: não é erro, é o estado de hoje. Dito alto no log
-    // para não virar silêncio confortável.
-    console.log(
-      "PLANILHA_CSV_URL nao esta definida — nada a ingerir.\n" +
-      "  Para ligar: GitHub > Settings > Secrets and variables > Actions > Variables\n" +
-      "  > New repository variable, nome PLANILHA_CSV_URL, valor = a URL do CSV publicado.\n" +
-      "  Passo a passo em portugues: moderacao/COMO_LIGAR_A_PLANILHA.md",
-    );
-    process.exit(0);
-  }
+  if (!URL_FEED || !TOKEN_FEED) fail(
+    "faltam PLANILHA_FEED_URL e/ou PLANILHA_FEED_TOKEN.\n" +
+    "  A origem e obrigatoria: seguir com o arquivo versionado poderia publicar um mapa vazio.\n" +
+    "  Configure os dois como Environment secrets em GitHub > Settings > Environments > " +
+    "github-pages. Nao use Repository secrets nem Variables."
+  );
 
-  // Aconteceu de verdade em 25/08: o valor colado na variável foi o texto do
-  // guia ("Value = o endereço"), não a URL. Sem esta checagem, o new URL() logo
-  // abaixo estoura um TypeError cru — um build vermelho a cada 10 minutos cuja
-  // mensagem não diz a ninguém o que fazer. O erro é do dono, mas a mensagem
-  // ilegível era nossa.
-  if (!/^https?:\/\//i.test(URL_CSV)) {
-    fail("PLANILHA_CSV_URL nao e um endereco de internet.\n" +
-      "  Parece que foi colado o texto do passo a passo em vez da URL.\n" +
-      "  O valor certo comeca com https://docs.google.com/ e sai de:\n" +
-      "  planilha > Arquivo > Compartilhar > Publicar na web > aba PUBLICAR > .csv > Publicar.\n" +
-      "  Troque em: Settings > Secrets and variables > Actions > Variables.");
+  let alvo;
+  try { alvo = new URL(URL_FEED); } catch (e) {
+    fail("PLANILHA_FEED_URL nao e um endereco de internet valido.");
   }
-
-  // A URL publicada do Google é servida de um cache de ~5 minutos. Sem furar
-  // esse cache, um pedido de REMOÇÃO pode falhar em silêncio: a rodada leria a
-  // versão velha da planilha, republicaria o grupo que acabou de sair e o CI
-  // ficaria verde. Um parâmetro que muda a cada rodada torna cada pedido único.
-  const alvo = new URL(URL_CSV);
+  if (alvo.protocol !== "https:" || alvo.hostname !== "script.google.com" ||
+      !/^\/macros\/s\/[^/]+\/exec$/.test(alvo.pathname)) {
+    fail("PLANILHA_FEED_URL precisa ser a URL /exec do Web App em script.google.com.");
+  }
   alvo.searchParams.set("_", String(Date.now()));
 
   const resp = await fetch(alvo, {
+    method: "POST",
     redirect: "follow",
-    headers: { "cache-control": "no-cache", pragma: "no-cache" },
+    headers: {
+      "cache-control": "no-cache",
+      pragma: "no-cache",
+      "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+    },
+    body: new URLSearchParams({ acao: "feed", token: TOKEN_FEED }),
+    signal: AbortSignal.timeout(20000),
   });
-  if (!resp.ok) fail(`a planilha respondeu ${resp.status}. A URL ainda esta publicada na web?`);
-  const texto = await resp.text();
-  if (texto.trimStart().startsWith("<")) {
-    fail("a URL devolveu uma pagina HTML, nao um CSV — confira se termina com output=csv");
+  if (!resp.ok) fail(`o feed privado respondeu ${resp.status}`);
+  let texto;
+  try { texto = await lerTextoLimitado(resp); }
+  catch (e) { fail("o feed privado passou de 2 MB ou nao era UTF-8 valido — origem recusada"); }
+  let envelope;
+  try { envelope = JSON.parse(texto); } catch (e) {
+    fail("o Web App nao devolveu JSON — confira a implantacao /exec e o acesso");
   }
+  let csv;
+  try { csv = feedParaCSV(envelope); } catch (e) { fail(e.message); }
 
-  const registros = registrosPublicaveis(texto);
+  const registros = registrosPublicaveis(csv);
+  const resolucao = await completarCoordenadas(registros, {
+    cache: lerCacheCoordenadas(CACHE_PATH),
+  });
+  if (resolucao.alterado) gravarCacheCoordenadas(resolucao.cache, CACHE_PATH);
   writeFileSync(OUT, JSON.stringify(registros, null, 2) + "\n", { encoding: "utf-8" });
-  console.log(`moderacao/aprovados.json atualizado: ${registros.length} cadastro(s).`);
+  console.log(`moderacao/aprovados.json atualizado: ${registros.length} cadastro(s); ` +
+    `${resolucao.consultas} link(s) curto(s) consultado(s) nesta rodada.`);
 }

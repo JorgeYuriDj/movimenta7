@@ -1,0 +1,18 @@
+# Scheduled fallback is isolated so GitHub's 60-day inactivity rule cannot
+# disable the form-triggered workflow along with the schedule.
+name: reserva agendada da publicacao
+
+on:
+  schedule:
+    # Avoid minute zero, when GitHub documents higher schedule delay/drop risk.
+    - cron: "7,17,27,37,47,57 * * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  refresh:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit

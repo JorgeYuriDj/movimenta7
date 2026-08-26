@@ -1,90 +1,100 @@
-# movimenta7 — quality gate + publication, in this order and no other.
+# movimenta7 — quality gate first; private ingestion and Pages publication second.
 #
-# WHY THE DEPLOY JOB LIVES HERE: with Pages in "deploy from a branch" mode the
-# push published the site whether this gate passed or failed — the CI was
-# decorative and CLAUDE.md's "exit != 0 = nao sobe" was simply not true. The
-# deploy job below declares `needs: qa`, so a red gate skips the deploy and the
-# previously published site stays up, untouched.
-#
-# The snapshot is REBUILT in the runner from moderacao/aprovados.json, so what
-# ships is always what the moderation step produces — never a stale committed
-# file edited by hand.
+# `qa` is deliberately secretless. The only job allowed to read the private feed
+# is `publish`, which is restricted in code to main and protected by the
+# `github-pages` environment. A dispatch against another branch may run the
+# public checks, but it cannot read production secrets or publish that branch.
 name: ci e publicacao
 
 on:
   push:
     branches: [main]
   pull_request:
-  # ⚠️ NAO REMOVA workflow_dispatch. Alem do botao "Run workflow", é por ele que
-  # o gatilho do formulário publica na hora: o Apps Script do dono chama
-  # POST /actions/workflows/ci.yml/dispatches a cada resposta recebida
-  # (`aoEnviarFormulario` em scripts/criar_form.gs). Tirar esta linha faz aquela
-  # chamada devolver HTTP 422 dentro da conta Google do dono, onde ninguém aqui
-  # vê o erro — o site volta a esperar o cron sem nada ficar vermelho.
-  # Congelado em tests/criar_form.test.mjs.
+  # Used by the Apps Script after a form submission or a `remover` edit.
   workflow_dispatch:
-  # A publicação é automática desde ADR-0006: ninguém aprova cadastro a cadastro,
-  # então alguém precisa ir à planilha de tempos em tempos — é este cron. Sem ele
-  # o site só atualizaria quando houvesse um push, e um formulário preenchido no
-  # domingo esperaria o próximo commit para virar pin.
-  #
-  # ~10 min é o piso útil: a URL publicada do Google tem cache de ~5 min (que
-  # ingerir_csv.mjs ainda fura com um parâmetro variável), e o GitHub atrasa cron
-  # em horário de pico. Na prática o cadastro aparece em 5 a 15 minutos.
-  #
-  # ⚠️ O GitHub DESLIGA workflows agendados após 60 dias sem nenhuma atividade no
-  # repositório. Se um dia o mapa parar de atualizar sozinho, é o primeiro lugar
-  # a olhar: Actions > ci e publicacao > "Enable workflow".
-  schedule:
-    - cron: "*/10 * * * *"
+  # Used only by refresh.yml, the isolated scheduled fallback.
+  workflow_call:
 
-# Least privilege by default; the deploy job widens it for itself only.
 permissions:
   contents: read
 
 concurrency:
   group: pages
-  cancel-in-progress: false # never abort a publish half-way
+  cancel-in-progress: false
 
 jobs:
   qa:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
+
       - name: Testes de unidade
         run: node --test tests/*.test.mjs
+
       - name: Gate de contraste (D9)
         run: node scripts/valida_contraste.mjs
 
       - name: Gate anti-innerHTML nos popups (CVE-2025-69993)
         run: node scripts/valida_popup.mjs
 
-      # Enquanto a variavel PLANILHA_CSV_URL nao existir, este passo avisa e
-      # segue: o site continua publicando o que ja esta em moderacao/.
-      # Um cadastro ruim NAO reprova aqui — ele sai sozinho, com AVISO no log
-      # (ADR-0006). So erro estrutural (planilha errada publicada) aborta.
-      - name: Trazer os cadastros da planilha
-        env:
-          PLANILHA_CSV_URL: ${{ vars.PLANILHA_CSV_URL }}
-        run: node scripts/ingerir_csv.mjs
-
-      - name: Reconstruir o snapshot a partir da moderacao
+      # Exercise the public-data gates without contacting the private origin.
+      # publish repeats both gates after ingesting the current private feed.
+      - name: Reconstruir snapshot de teste sem segredos
         run: node scripts/publicar_snapshot.mjs
 
       - name: Gate de dados publicos (allowlist D5/ADR-0004)
         run: node scripts/valida_snapshot.mjs
 
-      # Only the files the page actually loads. The branch-mode build served the
-      # whole repository, so scripts/, tests/, docs/ and moderacao/ were all
-      # reachable over HTTP. Nothing secret lives there — the repo is public —
-      # but the site has no reason to serve its own moderation queue, and a
-      # narrow bundle means a file added to the repo tomorrow is not published
-      # by default.
+  publish:
+    needs: qa
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+
+      - name: Restaurar cache de links curtos do Google Maps
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: .cache/geocache.json
+          key: ${{ runner.os }}-mov7-geocode-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-mov7-geocode-
+
+      - name: Trazer os cadastros do feed privado
+        env:
+          PLANILHA_FEED_URL: ${{ secrets.PLANILHA_FEED_URL }}
+          PLANILHA_FEED_TOKEN: ${{ secrets.PLANILHA_FEED_TOKEN }}
+        run: node scripts/ingerir_csv.mjs
+
+      - name: Salvar cache de links curtos atualizado
+        if: hashFiles('.cache/geocache.json.changed') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: .cache/geocache.json
+          key: ${{ runner.os }}-mov7-geocode-${{ github.run_id }}
+
+      - name: Reconstruir o snapshot a partir da moderacao
+        run: node scripts/publicar_snapshot.mjs
+
+      - name: Gate final de dados publicos (allowlist D5/ADR-0004)
+        run: node scripts/valida_snapshot.mjs
+
+      # Publish only the files loaded by the page. Private sources, scripts,
+      # tests, docs and the moderation projection are excluded by construction.
       - name: Montar o site (so o que a pagina carrega)
-        if: github.event_name != 'pull_request'
         run: |
           mkdir -p _site
           cp index.html .nojekyll _site/
@@ -92,22 +102,11 @@ jobs:
           echo "--- publicado:" && find _site -type f | sort
 
       - name: Empacotar o site
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: _site
-          retention-days: 1 # public repo: build artifacts are world-readable
+          retention-days: 1
 
-  deploy:
-    needs: qa # <- the whole point of this file: red gate = no publication
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5

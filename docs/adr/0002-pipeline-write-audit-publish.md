@@ -2,6 +2,12 @@
 
 **Status:** ACEITO pelo dono em 23/08/2026
 
+> **Atualização de 25/08/2026:** este ADR registra a decisão original. O
+> [ADR-0006](0006-publicacao-automatica-sem-dado-pessoal.md) removeu a revisão humana, e o
+> [ADR-0007](0007-feed-privado-e-atualizacao-automatica.md) definiu a implementação atual:
+> planilha privada → `POST` autenticado do Apps Script → gates no GitHub Actions → snapshot
+> público. O navegador não lê JSON vivo e `doGet` não entrega dados.
+
 **Contexto:** o mapa-embaixadores publica a planilha via CSV público — aceitável lá (dados
 anônimos), inaceitável aqui (cadastro tem nome/telefone do organizador). "Publicar na web"
 expõe a aba inteira.

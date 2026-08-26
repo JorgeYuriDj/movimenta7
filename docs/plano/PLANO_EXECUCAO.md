@@ -1,11 +1,18 @@
 # PLANO DE EXECUÇÃO — movimenta7
 
-> ⚠️ **Parte deste plano foi vencida pelos ADRs 0005 e 0006 (24–25/08/2026).** Onde este documento
+> ⛔ **DOCUMENTO DE PLANEJAMENTO DATADO (23/08/2026).** Partes foram vencidas pelos ADRs 0005,
+> 0006 e [0007](../adr/0007-feed-privado-e-atualizacao-automatica.md). Onde este documento
 > falar em **moderação humana**, coluna **`APROVADO=SIM`**, **botão de WhatsApp** ou **planilha
 > privada com nome e telefone**, quem manda é o
 > [ADR-0006](../adr/0006-publicacao-automatica-sem-dado-pessoal.md): publicação automática, zero
-> dado pessoal coletado, sem canal por telefone. O restante (fases, decisões D1–D10 de stack,
-> segurança e UX) continua valendo. Para divulgar, use [`DIVULGACAO.md`](DIVULGACAO.md).
+> dado pessoal pedido, sem canal por telefone. Onde aparecer CSV público, `doGet` vivo,
+> moderação por clique ou snapshot diário, quem manda é o ADR-0007: planilha privada, feed
+> autenticado no servidor, gatilhos imediatos, snapshot sanitizado e atualização da página.
+> O gate detecta telefone, e-mail, CPF/CNPJ e links; ele não infere nomes pessoais ou residências
+> em texto livre. Não leia as promessas genéricas deste plano histórico como capacidade atual.
+> As fases registram a intenção original, não o status atual. Para operar, use
+> [`moderacao/COMO_LIGAR_A_PLANILHA.md`](../../moderacao/COMO_LIGAR_A_PLANILHA.md); para divulgar,
+> use [`DIVULGACAO.md`](DIVULGACAO.md).
 
 > **Status: APROVADO pelo dono em 23/08/2026** — execução liberada.
 > Escrito em 23/08/2026, com base em: código real do `mapa-embaixadores-2026`, pesquisa de
@@ -86,7 +93,7 @@ Planilha Google PRIVADA  ──────────────  nunca publi
 ```
 
 Gate de CI antes de todo deploy (Akita #140): snapshot parseia + schema válido + **denylist**
-(nenhum telefone/e-mail pessoal no público) + testes do parser. Vermelho = não sobe.
+(nenhum telefone/e-mail/CPF/CNPJ detectável no público) + testes do parser. Vermelho = não sobe.
 
 ## 4. Fases em detalhe
 
@@ -173,7 +180,7 @@ Depois: atividades ativas · igrejas com ≥1 atividade · RAs atendidas · conf
 |---|---|
 | Virar "cemitério de horários antigos" (maior risco do produto) | Ciclo de confirmação 45/60/90 dias + botão "Avisar erro" + data de confirmação visível |
 | Apps Script fora do ar em pico de divulgação | Cascata: JSON vivo → snapshot commitado; cache no front |
-| Vazamento de dado pessoal | WAP + denylist no CI + planilha privada nunca publicada + CSP |
+| Dado pessoal em campo livre | Planilha privada + allowlist/denylist para identificadores detectáveis + proibição de nomes/residências + `remover` |
 | Tiles CARTO mudarem política | Camada OSM de fallback já configurada; troca é 1 linha no config |
 | Dono sobrecarregado na moderação | Moderação = 1 coluna SIM/NÃO + 1 clique no mapa; nada técnico |
 | Nome "movimenta7" colidir com marca | Verificar INPI/Instagram/domínio antes da identidade final (tarefa Fase 1) |

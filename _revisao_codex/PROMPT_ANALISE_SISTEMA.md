@@ -20,18 +20,23 @@ its own so the owner can accept or reject it individually.
 **movimenta7** — a community platform for discovering Adventist-organized physical activities
 in Brasília-DF (running, walking, cycling, volleyball, functional training, trails), open to
 the whole community. Static site (vanilla HTML/CSS/JS) on GitHub Pages; Leaflet 1.9.4 map of
-the DF; data pipeline Google Forms → private Sheet → human moderation → public sanitized JSON
-(Apps Script doGet, later a committed snapshot via GitHub Action). Non-technical owner
-moderates via a single APPROVED column. Launch: registrations open 24/08/2026; full site with
-map in the following week.
+the DF; search/filter/list alongside the map; data pipeline Google Form → private Sheet →
+authenticated Apps Script `POST` → GitHub Actions gates → public sanitized snapshot. There is
+no approval queue: form submissions and edits to `remover` call `workflow_dispatch`; the cron is
+the fallback. The browser never receives the feed URL/token and never reads the Sheet directly.
+The form does not ask for personal names, phone, e-mail or CREF. Value gates detect phone,
+e-mail, CPF/CNPJ and misplaced links; they do not claim to infer personal names or residential
+addresses from arbitrary text (ADR-0007).
 
 ### Step 1 — Read the context, in this order
 1. `CLAUDE.md` (project rules)
-2. `docs/plano/PLANO_EXECUCAO.md` (execution plan and locked decisions)
-3. `docs/plano/LANCAMENTO_DIA1.md` (day-1 launch)
-4. `docs/adr/*.md` (decisions with sources)
-5. All source code: `site/`, `scripts/`, `tests/`, `.github/workflows/`
-6. Reference project the structure was forked from: `C:\dev\mapa-embaixadores-2026`
+2. `README.md` (current overview)
+3. `docs/adr/*.md`, especially ADR-0007 (decisions and supersession)
+4. `moderacao/COMO_LIGAR_A_PLANILHA.md` and `moderacao/COMO_MODERAR.md` (current operations)
+5. `docs/plano/PLANO_EXECUCAO.md` and `docs/plano/LANCAMENTO_DIA1.md` (dated history; respect
+   their supersession notices)
+6. All source code: `index.html`, `css/`, `js/`, `scripts/`, `tests/`, `.github/workflows/`
+7. Reference project the structure was forked from: `C:\dev\mapa-embaixadores-2026`
 
 ### Step 2 — Cross-reference
 - Knowledge base: `C:\dev\Engenharia de IA\INDEX.md` (navigate from there; the project claims
@@ -50,11 +55,11 @@ map in the following week.
    non-technical reader.
 
 ### Non-negotiable facts (challenge the consequences, not the decisions)
-- Who builds: non-technical owner + Claude Code. Every recommendation must be executable by
-  this pair.
+- Who operates it: a non-technical owner with a coding agent. Every recommendation must be
+  executable by this pair.
 - Locked by ADR: static vanilla site on GitHub Pages; Leaflet 1.9.4 + CARTO raster tiles;
-  Write-Audit-Publish pipeline with private Sheet; LGPD minimization; no minors' data in MVP.
-- Launch date 24/08/2026 for registrations is fixed.
+  private authenticated Write-Audit-Publish pipeline; automatic publication without an approval
+  queue; browser reads only the sanitized snapshot; LGPD minimization; no minors' data in MVP.
 - HOUSE RULE ZERO: you are READ-ONLY on the codebase. You may ONLY create new files inside
   `_revisao_codex/`. Never overwrite an existing deliverable — version it (`_v2`).
 

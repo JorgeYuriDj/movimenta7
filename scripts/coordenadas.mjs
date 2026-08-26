@@ -144,6 +144,58 @@ const PADROES = [
   { nome: "consulta", re: new RegExp(`[?&](?:q|query|ll|center|daddr|destination)=${NUM},${NUM}`, "i") },
 ];
 
+/* The redirect resolver is a network boundary, not a general-purpose URL
+   follower. A valid Google short link must never turn the Actions runner into
+   an SSRF client through an unexpected Location header. Keep this list exact:
+   accepting `endsWith("google.com")` would also accept
+   `notgoogle.com`, while accepting every Google subdomain would be broader than
+   the one job this function has. */
+const HOSTS_GOOGLE_MAPS = new Set([
+  "google.com", "www.google.com", "maps.google.com",
+  "google.com.br", "www.google.com.br", "maps.google.com.br",
+]);
+
+function temPortaExplicita(valor) {
+  // URL.port normalizes the default :443 to "", so inspect the original
+  // authority too. Network-path redirects (//host:443/...) and backslashes are
+  // included because the WHATWG URL parser treats them as authority separators
+  // for HTTPS URLs.
+  const m = /^(?:[a-z][a-z\d+.-]*:)?[\\/]{2}([^/\\?#]*)/i
+    .exec(String(valor ?? "").trim());
+  if (!m) return false; // relative redirect; the already-approved base has no port
+  const host = m[1].slice(m[1].lastIndexOf("@") + 1);
+  return host.startsWith("[") ? host.includes("]:") : host.includes(":");
+}
+
+/**
+ * Resolves and validates one URL before it may be inspected or fetched.
+ * Returns its normalized HTTPS URL, or "" for anything outside Google Maps.
+ */
+function urlGoogleMapsParaRede(valor, base) {
+  if (temPortaExplicita(valor)) return "";
+  let p;
+  try { p = new URL(String(valor ?? ""), base); } catch (e) { return ""; }
+  if (p.protocol !== "https:" || p.username || p.password || p.port) return "";
+
+  const host = p.hostname.toLowerCase();
+  const caminhoMaps = /^\/maps(?:\/|$)/.test(p.pathname);
+  if (HOSTS_GOOGLE_MAPS.has(host)) {
+    // maps.google.* also uses the root path with q=/ll= query parameters.
+    if (host.startsWith("maps.")) return p.pathname === "/" || caminhoMaps ? p.href : "";
+    return caminhoMaps ? p.href : "";
+  }
+  // Google short links are opaque single tokens. Restricting the path keeps
+  // this resolver tied to that service instead of accepting arbitrary endpoints
+  // merely because they share a Google-owned host.
+  if (host === "maps.app.goo.gl") {
+    return /^\/[A-Za-z0-9_-]+\/?$/.test(p.pathname) ? p.href : "";
+  }
+  if (host === "goo.gl") {
+    return /^\/maps\/[A-Za-z0-9_-]+\/?$/.test(p.pathname) ? p.href : "";
+  }
+  return "";
+}
+
 /**
  * Reads the coordinate out of a map URL. Returns { lat, lon, fonte } or null.
  *
@@ -190,22 +242,36 @@ export function coordenadaDeUrl(url) {
  * crashed is a map that stops updating for everyone. The `buscar` parameter
  * exists so the tests can drive this without a network.
  */
-export async function resolverCoordenada(url, { buscar = fetch, maxHops = 4 } = {}) {
-  const direto = coordenadaDeUrl(url);
+export async function resolverCoordenada(url, { buscar = fetch, maxHops = 4, timeoutMs = 8000 } = {}) {
+  // Validate BEFORE parsing too: a hostile URL carrying /@lat,lon must not be
+  // accepted merely because it already names a coordinate and needs no fetch.
+  let atual = urlGoogleMapsParaRede(url);
+  if (!atual) return null;
+  const direto = coordenadaDeUrl(atual);
   if (direto) return direto;
 
-  let atual = String(url ?? "");
+  // One budget for the whole redirect chain. A fresh timeout per hop would let
+  // one hostile short link multiply the limit and hold the publication job.
+  const signal = typeof AbortSignal !== "undefined" &&
+    typeof AbortSignal.timeout === "function" && timeoutMs > 0
+    ? AbortSignal.timeout(timeoutMs)
+    : undefined;
   for (let i = 0; i < maxHops && atual; i++) {
     let resp;
     try {
-      resp = await buscar(atual, { redirect: "manual" });
+      const opcoes = { redirect: "manual" };
+      if (signal) opcoes.signal = signal;
+      resp = await buscar(atual, opcoes);
     } catch (e) {
       return null;
     }
     const proximo = resp?.headers?.get?.("location") || "";
     if (!proximo) return null; // chain ended without ever naming a position
-    let absoluto = "";
-    try { absoluto = new URL(proximo, atual).href; } catch (e) { return null; }
+    // Validate EVERY Location before parsing or following it. This blocks an
+    // open redirect from reaching localhost, cloud metadata, an external host,
+    // a non-HTTPS scheme or a Google-looking suffix controlled by somebody else.
+    const absoluto = urlGoogleMapsParaRede(proximo, atual);
+    if (!absoluto) return null;
     const achou = coordenadaDeUrl(absoluto);
     if (achou) return achou;
     atual = absoluto;
@@ -214,7 +280,7 @@ export async function resolverCoordenada(url, { buscar = fetch, maxHops = 4 } = 
 }
 
 /**
- * Drops coordinates that repeat across different groups.
+ * Reports coordinates shared by different groups without destroying them.
  *
  * The defence for the class of bug found above, kept even though the cause was
  * removed: any upstream that answers with a constant — a robot page, a cached
@@ -223,11 +289,12 @@ export async function resolverCoordenada(url, { buscar = fetch, maxHops = 4 } = 
  * to seven decimal places, and the fan-out that keeps same-region pins legible
  * only works on groups that fell back to a centroid.
  *
- * Returns the list with repeated positions cleared, plus a note per casualty so
- * the log says what happened. Clearing the position is the whole penalty: the
- * group still publishes, at its region's centroid.
+ * Different groups legitimately meet at the same church, park gate or court.
+ * The previous implementation deleted both exact positions, which silently
+ * made good Maps links approximate. The browser now fans overlapping markers
+ * out visually while every route link keeps pointing at the real place.
  */
-export function descartarCoordenadasRepetidas(registros) {
+export function coordenadasCompartilhadas(registros) {
   const vistos = new Map();
   for (const r of registros) {
     if (!Number.isFinite(r?.lat) || !Number.isFinite(r?.lon)) continue;
@@ -235,15 +302,9 @@ export function descartarCoordenadasRepetidas(registros) {
     vistos.set(chave, (vistos.get(chave) || 0) + 1);
   }
   const avisos = [];
-  for (const r of registros) {
-    if (!Number.isFinite(r?.lat) || !Number.isFinite(r?.lon)) continue;
-    const chave = `${r.lat.toFixed(6)},${r.lon.toFixed(6)}`;
-    if (vistos.get(chave) > 1) {
-      avisos.push(`"${r.grupo}": a posicao do link e identica a de outro cadastro — ` +
-        `sinal de que a origem devolveu um ponto fixo, entao os dois voltam para o centro da regiao`);
-      delete r.lat;
-      delete r.lon;
-    }
+  for (const [chave, total] of vistos) {
+    if (total > 1) avisos.push(`${total} grupos compartilham a coordenada ${chave}; ` +
+      `os pins serao separados apenas na apresentacao.`);
   }
   return { registros, avisos };
 }

@@ -3,22 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <!-- CSP: a página renderiza dado vindo de formulário aberto; isto transforma
-       uma regressão de XSS em violação bloqueada. unpkg = Leaflet com SRI;
-       cartocdn/osm = tiles do mapa (imagens). Pages não emite header — meta tag
-       é mitigação parcial documentada (ADR-0004).
-       As fontes são SELF-HOSTED de propósito: com default-src 'self', um CDN de
-       fonte exigiria abrir font-src para terceiro — mais superfície e mais uma
-       conexão no 4G, para ganhar nada. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com; img-src 'self' data: https://unpkg.com https://*.basemaps.cartocdn.com https://tile.openstreetmap.org; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'">
-  <title>movimenta7 — atividade física em comunidade no DF</title>
-  <meta name="description" content="Encontre uma atividade física perto de você no DF: corrida, caminhada, ciclismo, vôlei e mais. Organizado pela comunidade adventista, aberto a todos. Cadastre seu grupo no mapa.">
-  <meta property="og:title" content="movimenta7 — atividade física em comunidade no DF">
-  <meta property="og:description" content="Corrida, caminhada, ciclismo, vôlei e mais, em todo o DF. Cadastre a atividade do seu grupo e apareça no mapa que vai reunir tudo isso.">
+  <!-- Dados comunitários nunca viram HTML. O formulário roda isolado em um frame
+       do Google; o site só conversa com arquivos publicados no próprio domínio. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com; img-src 'self' data: https://unpkg.com https://*.basemaps.cartocdn.com https://tile.openstreetmap.org; connect-src 'self'; frame-src https://docs.google.com; base-uri 'none'; object-src 'none'; form-action 'none'">
+  <title>movimenta7 — encontre atividades físicas no DF</title>
+  <meta name="description" content="Encontre corrida, caminhada, ciclismo, vôlei e outras atividades perto de você no Distrito Federal. Veja o ponto, trace a rota e fale com o grupo pela rede social.">
+  <meta property="og:title" content="movimenta7 — movimente-se em comunidade">
+  <meta property="og:description" content="Encontre atividades físicas perto de você no DF ou adicione seu grupo ao mapa.">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="pt_BR">
   <meta property="og:url" content="https://jorgeyuridj.github.io/movimenta7/">
-  <!-- Capa do link no WhatsApp (URL absoluta: as redes não resolvem caminho relativo) -->
   <meta property="og:image" content="https://jorgeyuridj.github.io/movimenta7/assets/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -26,8 +20,6 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="theme-color" content="#BEF264">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%83%3C/text%3E%3C/svg%3E">
-  <!-- O LCP desta página é a headline (texto, nunca imagem). Precarregar a fonte
-       de display encurta a janela em que ela aparece na fonte de sistema. -->
   <link rel="preload" href="assets/fonts/bricolage-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/style.css">
   <script src="js/tema.js"></script>
@@ -42,146 +34,109 @@
         <span class="marca-nome">movimenta7</span>
       </a>
       <div class="topo-acoes">
-        <button id="botao-tema" class="botao-tema" type="button" aria-label="Mudar tema" aria-pressed="false">
-          <span class="icone-tema" aria-hidden="true">◐</span>
-        </button>
-        <a id="cta-topo" class="botao botao-primario botao-topo oculto" href="#" target="_blank" rel="noopener">Cadastrar atividade</a>
+        <a class="nav-mapa" href="#secao-mapa">Explorar mapa</a>
+        <button id="botao-tema" class="botao-tema" type="button" aria-label="Mudar tema" aria-pressed="false"><span class="icone-tema" aria-hidden="true">◐</span></button>
+        <a id="cta-topo" class="botao botao-primario botao-topo oculto" href="#" target="_blank" rel="noopener noreferrer" data-cadastro>Adicionar grupo</a>
       </div>
     </div>
   </header>
 
   <main id="conteudo">
-    <!-- HERO: a headline é o LCP (texto, nunca imagem) -->
     <section class="hero" aria-labelledby="titulo-hero">
-      <p class="eyebrow">Comunidade adventista do DF · aberto a todos</p>
-      <h1 id="titulo-hero"><span class="marca-traco">movimenta7</span></h1>
-      <p class="hero-sub">
-        Encontre uma atividade física perto de você, participe no seu ritmo e
-        movimente-se em comunidade. <strong>Corrida, caminhada, ciclismo, vôlei e mais,
-        em todo o DF.</strong>
-      </p>
-      <div class="hero-acoes">
-        <a id="cta-hero" class="botao botao-primario oculto" href="#" target="_blank" rel="noopener">Cadastre sua atividade →</a>
-        <p id="aviso-form" class="aviso-form">O link de cadastro entra no ar ainda hoje — volte em instantes.</p>
-        <a class="botao botao-secundario" href="#secao-mapa">Ver o mapa</a>
+      <div class="hero-conteudo">
+        <p class="eyebrow">Atividade física no DF · aberto a todos</p>
+        <h1 id="titulo-hero">Encontre companhia para se <span class="marca-traco">movimentar.</span></h1>
+        <p class="hero-sub">Descubra grupos perto de você, veja quando eles se encontram e chegue até lá com a rota do Google Maps.</p>
+        <div class="hero-acoes">
+          <a class="botao botao-secundario" href="#secao-mapa">Encontrar atividade</a>
+          <a id="cta-hero" class="botao botao-primario oculto" href="#" target="_blank" rel="noopener noreferrer" data-cadastro>Adicionar grupo ao mapa</a>
+        </div>
+        <p id="aviso-form" class="aviso-form">O cadastro está temporariamente indisponível. O mapa continua funcionando.</p>
+        <ul class="selos-confianca" aria-label="Características do serviço">
+          <li>Sem login</li><li>Sem telefone ou e-mail</li><li>Publicação automática</li>
+        </ul>
       </div>
+      <aside class="hero-cartao" aria-label="Como usar o movimenta7">
+        <span class="hero-cartao-icone" aria-hidden="true">⌖</span>
+        <strong>Escolha. Converse. Vá.</strong>
+        <p>Abra um grupo, conheça a atividade pela rede social institucional e use a rota para chegar ao ponto de encontro.</p>
+        <a href="#secao-mapa">Ver o que acontece perto de mim <span aria-hidden="true">↓</span></a>
+      </aside>
     </section>
 
-    <!-- MODALIDADES: mostram de relance que "atividade física" aqui é plural.
-         Não são filtros — filtro só faz sentido quando houver o que filtrar
-         (Fase 1). Prometer um controle que não controla nada é pior que não ter. -->
-    <ul class="chips" aria-label="Modalidades que já podem ser cadastradas">
-      <li class="chip"><span aria-hidden="true">🏃</span> Corrida</li>
-      <li class="chip"><span aria-hidden="true">🚶</span> Caminhada</li>
-      <li class="chip"><span aria-hidden="true">🚴</span> Ciclismo</li>
-      <li class="chip"><span aria-hidden="true">🏐</span> Vôlei</li>
-      <li class="chip"><span aria-hidden="true">💪</span> Funcional</li>
-      <li class="chip"><span aria-hidden="true">⛰️</span> Trilha</li>
-      <li class="chip"><span aria-hidden="true">➕</span> e mais</li>
-    </ul>
+    <section id="secao-mapa" class="secao mapa-secao" aria-labelledby="titulo-mapa">
+      <div class="secao-cabecalho">
+        <div>
+          <p class="secao-kicker">Explore o Distrito Federal</p>
+          <h2 id="titulo-mapa">Encontre seu próximo movimento</h2>
+          <p class="secao-sub">Pesquise por grupo, modalidade ou região. Depois, abra a rota ou fale com a organização pela rede social.</p>
+        </div>
+        <a id="cta-mapa" class="botao botao-primario oculto" href="#" target="_blank" rel="noopener noreferrer" data-cadastro>+ Adicionar atividade</a>
+      </div>
 
-    <!-- 3 BULLETS DE VALOR -->
-    <section class="valores" aria-label="Por que participar">
-      <div class="valor">
-        <span class="valor-icone" aria-hidden="true">📍</span>
-        <strong>Perto de você</strong>
-        <p>Grupos por região administrativa, num mapa só — ache o mais próximo e apareça.</p>
+      <div id="dados-status" class="dados-status" role="status" aria-live="polite">
+        <span id="dados-status-texto">Buscando as atividades mais recentes…</span>
+        <button id="dados-tentar" class="botao-link oculto" type="button">Tentar novamente</button>
       </div>
-      <div class="valor">
-        <span class="valor-icone" aria-hidden="true">🤝</span>
-        <strong>No seu ritmo</strong>
-        <p>Do primeiro passo ao pelotão: iniciantes são bem-vindos e ninguém fica para trás.</p>
+
+      <form id="filtros" class="filtros" role="search" aria-label="Filtrar atividades">
+        <label class="campo-busca"><span class="rotulo-campo">Buscar</span><span class="input-com-icone"><span aria-hidden="true">⌕</span><input id="busca" type="search" placeholder="Grupo, igreja ou local" autocomplete="off"></span></label>
+        <label><span class="rotulo-campo">Modalidade</span><select id="filtro-modalidade"><option value="">Todas</option></select></label>
+        <label><span class="rotulo-campo">Região</span><select id="filtro-regiao"><option value="">Todas</option></select></label>
+        <button id="limpar-filtros" class="botao-limpar oculto" type="button">Limpar filtros</button>
+      </form>
+
+      <div class="explorador">
+        <figure class="mapa-figura">
+          <div id="mapa" class="mapa" role="region" aria-label="Mapa do Distrito Federal com grupos de atividade física" aria-busy="true"></div>
+          <div id="mapa-status" class="mapa-status" role="status" aria-live="polite"><span id="mapa-status-texto">Preparando o mapa…</span><button id="mapa-tentar" class="botao botao-secundario oculto" type="button">Tentar novamente</button></div>
+          <div id="faixa-nascendo" class="faixa-nascendo oculto">🌱 Ainda não há grupos publicados. Adicione o primeiro da sua região.</div>
+          <figcaption>O círculo tracejado indica uma posição aproximada no centro da região. Grupos no mesmo endereço aparecem ligeiramente afastados para todos continuarem acessíveis.</figcaption>
+        </figure>
+
+        <aside class="lista-painel" aria-labelledby="titulo-lista">
+          <div class="lista-cabecalho"><div><h3 id="titulo-lista">Atividades</h3><p id="resultado-resumo">Carregando…</p></div><span class="lista-indicador" aria-hidden="true"></span></div>
+          <ul id="lista-grupos" class="lista-grupos"></ul>
+          <div id="lista-vazia" class="lista-vazia oculto"><span aria-hidden="true">⌕</span><strong>Nenhuma atividade encontrada</strong><p>Tente retirar um filtro ou adicione um grupo nessa região.</p></div>
+        </aside>
       </div>
-      <div class="valor">
-        <span class="valor-icone" aria-hidden="true">💚</span>
-        <strong>Em comunidade</strong>
-        <p>Organizado por igrejas e grupos locais, gratuito na maioria das atividades e aberto a todos.</p>
-      </div>
+
+      <div class="linha-viva"><p id="contador" class="contador" aria-live="polite"></p><p id="atualizado" class="atualizado oculto" aria-live="polite"></p></div>
+      <p class="fonte-dados">Limites das regiões: IPEDF / SEDUH-GDF. A posição é extraída do link do mapa; quando ele não contém coordenadas, mostramos apenas o centro aproximado da região. Viu algo incorreto? <a id="link-denuncia" href="#" rel="noopener">Peça a correção ou remoção</a>.</p>
     </section>
 
-    <!-- MAPA -->
-    <section id="secao-mapa" class="secao" aria-labelledby="titulo-mapa">
-      <h2 id="titulo-mapa">O mapa do movimento</h2>
-      <p class="secao-sub">Cada pin é um grupo real, e o emoji diz de que atividade se trata.
-        Toque num pin para ver dia, horário e local, e falar com o grupo pela rede social da igreja.</p>
-      <figure class="mapa-figura">
-        <div id="mapa" class="mapa" aria-label="Mapa do Distrito Federal com os grupos de atividade física"></div>
-        <p id="mapa-status" class="mapa-status">Carregando o mapa…</p>
-        <div id="faixa-nascendo" class="faixa-nascendo">🌱 O mapa está nascendo — cadastre seu grupo e seja o primeiro pin da sua região.</div>
-      </figure>
-      <!-- LEGENDA: o mapa passou a distinguir grupos por emoji, e informação dada
-           só por ícone não atende WCAG 1.4.1. Estática no HTML, e não desenhada
-           pelo JS, para continuar valendo se o Leaflet não carregar — e para
-           também responder "o que dá para cadastrar aqui?". -->
-      <ul class="chips chips--legenda" aria-label="O que cada emoji do mapa significa">
-        <li class="chip"><span aria-hidden="true">🏃</span> Corrida</li>
-        <li class="chip"><span aria-hidden="true">🚶</span> Caminhada</li>
-        <li class="chip"><span aria-hidden="true">🚴</span> Ciclismo</li>
-        <li class="chip"><span aria-hidden="true">🏐</span> Vôlei</li>
-        <li class="chip"><span aria-hidden="true">⚽</span> Futebol</li>
-        <li class="chip"><span aria-hidden="true">💪</span> Funcional</li>
-        <li class="chip"><span aria-hidden="true">⛰️</span> Trilhas</li>
-        <li class="chip"><span aria-hidden="true">🏊</span> Natação</li>
-        <li class="chip"><span aria-hidden="true">🤸</span> Outra</li>
-      </ul>
-      <div class="linha-viva">
-        <p id="contador" class="contador" aria-live="polite"></p>
-        <p id="atualizado" class="atualizado oculto" aria-live="polite"></p>
-      </div>
-      <p class="fonte-dados">Limites das regiões administrativas: IPEDF / SEDUH-GDF (camada Limite_RA_2019).
-        Cada grupo é responsável pelas informações que cadastrou. Viu algo errado ou fora do lugar?
-        <a id="link-denuncia" href="#" rel="noopener">Avise a organização</a> e nós tiramos do ar.</p>
+    <section class="chamada-cadastro" aria-labelledby="titulo-cadastro">
+      <div><p class="secao-kicker">Seu grupo também pode estar aqui</p><h2 id="titulo-cadastro">Do cadastro ao mapa, sem fila.</h2><p>Informe somente a atividade, o local público, a rede social institucional e o link do Google Maps. A verificação automática bloqueia telefones, e-mails, documentos e links estranhos; não escreva nomes de pessoas.</p></div>
+      <div class="chamada-acoes"><a id="cta-meio" class="botao botao-primario oculto" href="#" target="_blank" rel="noopener noreferrer" data-cadastro>Adicionar grupo ao mapa</a><span>Leva cerca de 2 minutos</span></div>
     </section>
 
-    <!-- COMO FUNCIONA -->
     <section id="como-funciona" class="secao" aria-labelledby="titulo-como">
-      <h2 id="titulo-como">Como funciona</h2>
-      <p class="secao-sub">Três passos, e o terceiro é com quem está procurando você.</p>
+      <p class="secao-kicker">Simples de verdade</p>
+      <h2 id="titulo-como">Você encontra e participa.</h2>
       <ol class="passos">
-        <li><strong>Cadastre a atividade do seu grupo</strong> leva uns 2 minutos: modalidade, região,
-          dia, horário, local público de encontro e o @ da rede social da igreja ou o link do
-          Google Maps do lugar.</li>
-        <li><strong>Seu grupo entra no mapa sozinho</strong>, em até 1 hora. Não há fila de
-          aprovação: uma checagem automática confere que nenhum dado pessoal e nenhum link
-          estranho passem, e é só isso que separa o cadastro do mapa.</li>
-        <li><strong>Quem está por perto encontra vocês</strong> e fala com o grupo pela rede social
-          que vocês indicaram, ou aparece no local.</li>
+        <li><strong>Encontre um grupo</strong><span>Use o mapa ou os filtros para descobrir uma atividade perto de você.</span></li>
+        <li><strong>Conheça a organização</strong><span>Abra a rede social da igreja ou do grupo e confira os detalhes.</span></li>
+        <li><strong>Trace a rota e apareça</strong><span>O Google Maps leva você ao ponto público; chegando lá, converse com os responsáveis.</span></li>
       </ol>
-      <p class="aviso-privacidade"><strong>Privacidade (LGPD):</strong> o movimenta7 é uma iniciativa
-        comunitária independente. <strong>Não pedimos nenhum dado pessoal</strong> — nem nome, nem
-        telefone, nem e-mail. O cadastro é sobre a atividade e sobre a igreja/organização, e tudo o
-        que você preenche é público no mapa: nome do grupo, organização, modalidade, região, dia,
-        horário, local público de encontro, custo, para quem é aberto, se há profissional de
-        educação física acompanhando, e o perfil de rede social ou o link de mapa do local.
-        <strong>Não publique o telefone, o endereço de casa nem o nome de ninguém</strong> — a
-        checagem automática recusa cadastros com esses dados, e um cadastro recusado simplesmente
-        não aparece. Não coletamos dados de menores de idade. Como não há fila de aprovação, o
-        conteúdo é de responsabilidade de quem cadastrou.
-        Para corrigir ou remover um cadastro, <a id="link-remocao" href="#" rel="noopener">use o mesmo
-        formulário e escolha "corrigir ou remover"</a> — sai do mapa em até 24 horas.
-        Base legal: consentimento (art. 7º, I da LGPD). Regime de agente
-        de pequeno porte — Res. CD/ANPD nº 2/2022.</p>
+      <details class="privacidade"><summary>Privacidade e segurança do cadastro</summary><div><p><strong>Somente informações institucionais e da atividade ficam públicas.</strong> Não pedimos nome de pessoa, telefone, e-mail, documento, endereço residencial nem dados de menores.</p><p>Antes de publicar, uma checagem automática limita os campos, bloqueia telefone, e-mail, CPF/CNPJ e permite links somente de redes sociais conhecidas e serviços de mapa. Nomes não são pedidos e não devem ser escritos. Para corrigir ou retirar uma atividade, <a id="link-remocao" href="#" rel="noopener">use o mesmo formulário</a>. Depois que o pedido é conferido, a atualização do mapa é automática.</p></div></details>
     </section>
   </main>
 
   <footer class="rodape">
-    <p><strong>Iniciativa comunitária independente e voluntária</strong>, organizada por membros da
-      comunidade adventista do DF e aberta a toda Brasília. Participação gratuita na maioria das
-      atividades; cada grupo é responsável pela própria organização.</p>
-    <p>Mapa: © OpenStreetMap contributors © CARTO · Limites das RAs: IPEDF / SEDUH-GDF.
-      <a id="link-repo" href="https://github.com/JorgeYuriDj/movimenta7" target="_blank" rel="noopener">Código aberto no GitHub</a>.</p>
+    <div><a class="marca marca-rodape" href="#conteudo"><span class="marca-pin" aria-hidden="true">🏃</span><span class="marca-nome">movimenta7</span></a><p>Iniciativa comunitária independente, voluntária e aberta a todo o DF.</p></div>
+    <p>Mapa: © OpenStreetMap contributors © CARTO · Limites: IPEDF / SEDUH-GDF.<br><a id="link-repo" href="https://github.com/JorgeYuriDj/movimenta7" target="_blank" rel="noopener noreferrer">Ver o código no GitHub</a>.</p>
   </footer>
 
-  <!-- CTA fixo na zona do polegar (mobile) — aparece quando o form estiver configurado -->
-  <div id="cta-fixo" class="cta-fixo oculto">
-    <a id="cta-fixo-link" class="botao botao-primario" href="#" target="_blank" rel="noopener">Cadastre sua atividade →</a>
-  </div>
+  <div id="cta-fixo" class="cta-fixo oculto"><a id="cta-fixo-link" class="botao botao-primario" href="#" target="_blank" rel="noopener noreferrer" data-cadastro>Adicionar grupo ao mapa</a></div>
 
-  <noscript>
-    <p class="sem-js">Este site precisa de JavaScript para mostrar o mapa. Os dados públicos ficam
-      no <a href="data/snapshot.json">arquivo aberto de dados</a>.</p>
-  </noscript>
+  <dialog id="cadastro-dialog" class="cadastro-dialog" aria-labelledby="cadastro-dialog-titulo">
+    <div class="cadastro-dialog-topo"><div><span class="dialog-etapa">Cadastro seguro</span><h2 id="cadastro-dialog-titulo">Adicionar atividade</h2></div><button id="cadastro-fechar" class="dialog-fechar" type="button" aria-label="Fechar cadastro">×</button></div>
+    <div class="cadastro-aviso"><p><strong>Não informe dados pessoais.</strong> O formulário pede somente informações públicas da atividade e da organização.</p><a id="cadastro-externo" href="#" target="_blank" rel="noopener noreferrer">Abrir em uma nova guia</a></div>
+    <iframe id="cadastro-frame" title="Formulário para adicionar uma atividade ao mapa" loading="lazy" referrerpolicy="no-referrer"></iframe>
+    <div class="cadastro-dialog-rodape"><p>Depois de enviar, volte ao mapa. Ele confere novidades automaticamente.</p><button id="cadastro-voltar" class="botao botao-secundario" type="button">Voltar ao mapa</button></div>
+  </dialog>
 
+  <noscript><p class="sem-js">Este site precisa de JavaScript para mostrar o mapa. Os dados públicos da atividade ficam no <a href="data/snapshot.json">arquivo aberto de dados</a>.</p></noscript>
   <script src="js/config.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>

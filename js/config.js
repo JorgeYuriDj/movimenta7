@@ -3,7 +3,7 @@
    editado para "ligar" o site.
 
    Como preencher (Jorge):
-   1. FORM_URL — link público do Google Form ("PUBLICAR ESTE" no
+   1. FORM_URL — link público do Google Form ("link para compartilhar" no
       log do scripts/criar_form.gs). É o mesmo link usado para
       cadastrar E para pedir correção/remoção.
    Deixe "" (vazio) enquanto não tiver — o site mostra um aviso

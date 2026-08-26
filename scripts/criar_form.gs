@@ -1,56 +1,41 @@
 /**
- * movimenta7 — creates the activity registration Google Form, the linked Sheet,
- * and the PUBLICAR tab that the site reads.
+ * movimenta7 — creates the activity registration Google Form and its private,
+ * linked response spreadsheet.
  * Run once in script.google.com (function: criarFormMovimenta7). Owner: Jorge Yuri.
  * All user-facing strings are pt-BR; code is English (project convention).
  *
  * ADR-0006 (25/08/2026) rewrote this form around two owner decisions:
  *
- * 1. NO PERSONAL DATA IS COLLECTED AT ALL. The old form asked for the
+ * 1. PERSONAL DATA IS NOT REQUESTED OR PUBLISHED. The old form asked for the
  *    submitter's name and WhatsApp "privately", plus the name of the physical
- *    education professional. All three are gone. What is not collected cannot
- *    leak, cannot be subject to an access request, and cannot be published by
- *    a wrong click on the sharing screen — which is a stronger guarantee than
- *    any of the checks downstream, because it does not depend on us being
- *    careful.
+ *    education professional. All three questions are gone. Free-text answers
+ *    can still contain data a person types against the warning, so the form is
+ *    honest about what it asks and the publication pipeline independently
+ *    blocks personal data before anything reaches the map.
  *
  * 2. THE FORM BRANCHES INTO TWO PAGES, and that is a safety mechanism, not a
  *    convenience. Publication is automatic now, so a removal request typed into
  *    the registration fields would come back as a NEW pin. Removal requests
- *    live on their own page, in their own columns, which the PUBLICAR tab never
- *    reads. A removal literally cannot become a registration.
+ *    live on their own page, in their own columns, which the private feed never
+ *    serializes. A removal literally cannot become a registration.
  *
  * The two link questions replace the old free "contato": a link is the one
  * answer that can send a visitor somewhere harmful, and nobody reviews it
  * before it goes live, so it is restricted to social profiles and map links —
  * enforced by the host allowlist in js/util.js, not by this form.
  *
- * 3. IT ALSO BUILDS THE PUBLICAR TAB (25/08/2026), which used to be a 20-line
- *    array formula the owner pasted by hand. That paste was the most
- *    failure-prone step of the whole launch, and every reason why disappears by
- *    doing it here instead:
- *      - the response sheet's name is locale-dependent ("Respostas ao
- *        formulário 1", "Form Responses 1", plus a number when a file receives
- *        more than one form). The pasted formula hard-coded "Respostas!" and
- *        the guide asked the owner to find and fix it by hand;
- *      - a formula typed into the grid is parsed in the SPREADSHEET's locale —
- *        pt-BR separates arguments with ";", en-US with ",". setFormula() always
- *        takes the US form and the sheet converts it, so the separators cannot
- *        come out wrong here;
- *      - the MATCH() strings repeated the question titles by hand, and any drift
- *        between the two lists produced #REF! in a tab nobody looks at. Both now
- *        come from TITULOS below, so drift is impossible.
+ * 3. THE RESPONSE SHEET STAYS PRIVATE. GitHub Actions reads a narrow projection
+ *    through the authenticated Web App endpoint below. No spreadsheet tab needs
+ *    to be published on the web, and private correction/removal text never
+ *    crosses that endpoint.
  *
- * Running it again is safe: it creates a NEW form and a NEW spreadsheet and
- * never touches the previous ones (REGRA ZERO — nothing is ever deleted). That
- * is also why it is the WRONG function once the form has been shared: to repair
- * the PUBLICAR tab of the sheet already in use, run `consertarAbaPublicar`
- * instead, from inside that spreadsheet.
+ * Running this function again creates a NEW form and a NEW spreadsheet and
+ * never touches the previous ones (REGRA ZERO — nothing is ever deleted).
  */
 
 /**
  * Question title -> column name in moderacao/aprovados.json.
- * Single source of truth: the questions and the PUBLICAR formula are both
+ * Single source of truth: the questions and the private feed projection are
  * generated from this object. The column names must stay equal to COLUNAS in
  * scripts/ingerir_csv.mjs, which aborts on any column it does not recognise.
  */
@@ -69,41 +54,68 @@ var TITULOS = {
   publico: 'Aberta a quem?',
 };
 
-/** Column order of the PUBLICAR tab. Same order as ingerir_csv.mjs. */
+/** Public feed column order. Same order as ingerir_csv.mjs. */
 var COLUNAS = [
   'grupo', 'organizacao', 'regiao', 'modalidades', 'dias', 'horario',
   'local', 'rede_social', 'mapa', 'orientacao_profissional', 'custo', 'publico',
 ];
 
 var COL_REMOVER = 'remover';
-var ABA_PUBLICAR = 'PUBLICAR';
+var TITULO_CONSENTIMENTO = 'Consentimento (LGPD)';
+var TITULO_ACAO = 'O que você quer fazer?';
+var ACAO_CADASTRAR = 'Cadastrar uma atividade nova';
+var ACAO_CORRIGIR_REMOVER = 'Corrigir ou REMOVER um cadastro que já está no mapa';
+var TITULO_PAGINA_CADASTRO = 'Dados da atividade';
+var TITULO_PAGINA_REMOCAO = 'Pedido de correção ou remoção';
+var TITULO_PEDIDO_PRIVADO = 'O que precisa ser corrigido ou removido?';
+var TEXTO_CONSENTIMENTO =
+  'LI e CONCORDO: o cadastro da atividade pode ser publicado; pedidos de correção ou remoção ficam privados';
+var AJUDA_REDE_SOCIAL =
+  'Ex.: @iasd.aguasclaras — ou o endereço do perfil no Instagram, Facebook, ' +
+  'YouTube ou Strava. NÃO coloque telefone nem link de grupo de WhatsApp: o site recusa. ' +
+  'Informe um perfil público da igreja ou do grupo.';
+var AJUDA_MAPA =
+  'No app do Google Maps: procure o lugar, toque em Compartilhar e cole o ' +
+  'endereço aqui (fica parecido com maps.app.goo.gl/...). Use o local do ENCONTRO ou o da ' +
+  'igreja — nunca a casa de alguém. Este link é obrigatório para publicar o ponto certo.';
+var AJUDA_PEDIDO_PRIVADO = 'Se for correção, escreva o dado certo. O pedido fica privado.';
+
+function descricaoDoFormulario_() {
+  return 'Cadastre a atividade física do seu grupo/igreja no movimenta7 — a rede de atividades ' +
+    'da comunidade adventista do DF, aberta a toda Brasília. Leva ~2 minutos.\n\n' +
+    'ATENÇÃO: os dados do ramo CADASTRO vão para o mapa público automaticamente, normalmente ' +
+    'em cerca de 1 minuto. Pedidos de correção ou remoção ficam privados: NÃO PUBLICAMOS ' +
+    'essas respostas.\n\n' +
+    'NÃO SOLICITAMOS DADOS PESSOAIS (LGPD): nem seu nome, nem telefone, nem e-mail. ' +
+    'O cadastro público é sobre a ATIVIDADE e sobre a IGREJA/ORGANIZAÇÃO. NÃO escreva ' +
+    'telefone, endereço de casa nem o nome de ninguém em nenhum campo. A checagem automática ' +
+    'bloqueia telefone, e-mail, CPF/CNPJ e links estranhos antes da publicação; um cadastro ' +
+    'recusado simplesmente não aparece no mapa. Não solicite nem informe dados de menores de ' +
+    'idade. Para corrigir ou remover, volte a este mesmo formulário e escolha a segunda opção. ' +
+    'Base legal: consentimento (art. 7º, I, LGPD). Agente de pequeno porte — Res. CD/ANPD 2/2022.';
+}
+
+function confirmacaoDoFormulario_() {
+  return 'Resposta recebida. Cadastros válidos entram no mapa automaticamente; pedidos de ' +
+    'correção ou remoção ficam privados. Acompanhe o mapa: ' +
+    'https://jorgeyuridj.github.io/movimenta7/#secao-mapa';
+}
 
 function criarFormMovimenta7() {
   var form = FormApp.create('movimenta7 — Cadastro de atividade física');
-  form.setDescription(
-    'Cadastre a atividade física do seu grupo/igreja no movimenta7 — a rede de atividades ' +
-    'da comunidade adventista do DF, aberta a toda Brasília. Leva ~2 minutos.\n\n' +
-    'ATENÇÃO: o que você preencher aqui vai para o mapa público SOZINHO, em até ' +
-    '1 hora. Não existe fila de aprovação.\n\n' +
-    'NÃO PEDIMOS NENHUM DADO PESSOAL (LGPD): nem seu nome, nem telefone, nem e-mail. ' +
-    'Este cadastro é sobre a ATIVIDADE e sobre a IGREJA/ORGANIZAÇÃO, e tudo o que você ' +
-    'responder é público no site. NÃO escreva telefone, endereço de casa nem o nome de ' +
-    'ninguém em nenhum campo — a checagem automática recusa cadastros com esses dados, e ' +
-    'um cadastro recusado simplesmente não aparece no mapa. ' +
-    'Não coletamos dados de menores de idade. Para corrigir ou remover, volte a este mesmo ' +
-    'formulário e escolha a segunda opção. ' +
-    'Base legal: consentimento (art. 7º, I, LGPD). Agente de pequeno porte — Res. CD/ANPD 2/2022.');
+  form.setDescription(descricaoDoFormulario_());
   form.setCollectEmail(false);
   form.setLimitOneResponsePerUser(false);
+  form.setConfirmationMessage(confirmacaoDoFormulario_());
 
-  form.addMultipleChoiceItem().setTitle('Consentimento (LGPD)').setRequired(true).setChoiceValues([
-    'LI e CONCORDO: o que eu preencher aqui é público e entra no mapa automaticamente']);
+  form.addMultipleChoiceItem().setTitle(TITULO_CONSENTIMENTO).setRequired(true)
+    .setChoiceValues([TEXTO_CONSENTIMENTO]);
 
   // Comes last on page 1 so the branch is decided right before the page turns.
-  var acao = form.addMultipleChoiceItem().setTitle('O que você quer fazer?').setRequired(true);
+  var acao = form.addMultipleChoiceItem().setTitle(TITULO_ACAO).setRequired(true);
 
   // ---------- página 2: cadastro (as colunas que viram pin) ----------
-  var pgCadastro = form.addPageBreakItem().setTitle('Dados da atividade');
+  var pgCadastro = form.addPageBreakItem().setTitle(TITULO_PAGINA_CADASTRO);
 
   form.addTextItem().setTitle(TITULOS.grupo).setRequired(true)
     .setHelpText('Ex.: Corredores da IASD Águas Claras. Nome do GRUPO, não o seu.');
@@ -142,29 +154,27 @@ function criarFormMovimenta7() {
     .setChoiceValues(['Gratuito','Pago']);
 
   form.addTextItem().setTitle(TITULOS.rede_social)
-    .setHelpText('Ex.: @iasd.aguasclaras — ou o endereço do perfil no Instagram, Facebook, ' +
-      'YouTube ou Strava. NÃO coloque telefone nem link de grupo de WhatsApp: o site recusa. ' +
-      'Deixe em branco se o grupo não tiver perfil.');
+    .setRequired(true)
+    .setHelpText(AJUDA_REDE_SOCIAL);
   form.addTextItem().setTitle(TITULOS.mapa)
-    .setHelpText('No app do Google Maps: procure o lugar, toque em Compartilhar e cole o ' +
-      'endereço aqui (fica parecido com maps.app.goo.gl/...). Use o local do ENCONTRO ou o da ' +
-      'igreja — nunca a casa de alguém. Deixe em branco se não tiver.');
+    .setRequired(true)
+    .setHelpText(AJUDA_MAPA);
 
   // ---------- página 3: correção/remoção (colunas que o site NUNCA lê) ----------
-  var pgRemocao = form.addPageBreakItem().setTitle('Pedido de correção ou remoção');
+  var pgRemocao = form.addPageBreakItem().setTitle(TITULO_PAGINA_REMOCAO);
   form.addTextItem().setTitle('Qual grupo sai ou muda? (nome exato como aparece no mapa)')
     .setRequired(true);
   form.addTextItem().setTitle('Região administrativa desse grupo').setRequired(true);
-  form.addParagraphTextItem().setTitle('O que precisa ser corrigido ou removido?')
+  form.addParagraphTextItem().setTitle(TITULO_PEDIDO_PRIVADO)
     .setRequired(true)
-    .setHelpText('Se for correção, escreva o dado certo. Atendemos em até 24 horas.');
+    .setHelpText(AJUDA_PEDIDO_PRIVADO);
 
   // Navigation is what keeps the two paths apart. Without it the person who
   // finishes the registration page falls straight into the removal page and is
   // asked to justify removing the group they just created.
   acao.setChoices([
-    acao.createChoice('Cadastrar uma atividade nova', pgCadastro),
-    acao.createChoice('Corrigir ou REMOVER um cadastro que já está no mapa', pgRemocao),
+    acao.createChoice(ACAO_CADASTRAR, pgCadastro),
+    acao.createChoice(ACAO_CORRIGIR_REMOVER, pgRemocao),
   ]);
 
   // ⚠️ setGoToPage governs the page BEFORE the break it is called on, not the
@@ -184,6 +194,7 @@ function criarFormMovimenta7() {
   pgRemocao.setGoToPage(FormApp.PageNavigationType.SUBMIT);
 
   var ss = SpreadsheetApp.create('movimenta7 — respostas');
+  PropertiesService.getScriptProperties().setProperty(PROP_PLANILHA_ID, ss.getId());
   var abaPadrao = ss.getSheets()[0].getSheetName();
   form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
 
@@ -194,24 +205,20 @@ function criarFormMovimenta7() {
   ss = SpreadsheetApp.openById(ss.getId());
 
   var respostas = acharAbaDeRespostas(ss, abaPadrao);
-  var publicar = null;
   if (respostas) {
     acrescentarColunaRemover(respostas);
-    publicar = montarAbaPublicar(ss, respostas);
   }
 
   Logger.log('Form (editar): ' + form.getEditUrl());
-  Logger.log('Form (PUBLICAR ESTE): ' + form.getPublishedUrl());
+  Logger.log('Form (link para compartilhar): ' + form.getPublishedUrl());
   Logger.log('Planilha de respostas: ' + ss.getUrl());
-  if (publicar) {
+  if (respostas) {
     Logger.log('OK: aba de respostas encontrada ("' + respostas.getSheetName() + '")');
-    Logger.log('OK: coluna "remover" criada e aba PUBLICAR montada — nada para colar a mao.');
-    Logger.log('AGORA, na planilha: Arquivo > Compartilhar > Publicar na web,');
-    Logger.log('       escolha a aba PUBLICAR (NAO "Documento inteiro") e o formato .csv.');
-    Logger.log('DEPOIS, para o cadastro entrar no mapa em ~2 minutos em vez de ate 1 hora:');
-    Logger.log('       rode `instalarGatilhoDePublicacao` (Parte 4 do COMO_LIGAR_A_PLANILHA.md).');
+    Logger.log('OK: coluna "remover" criada; a planilha continua privada.');
+    Logger.log('AGORA: rode `configurarFeedPrivado`, implante o App da Web e depois rode');
+    Logger.log('       `instalarGatilhoDePublicacao` para automatizar cadastro e remocao.');
   } else {
-    Logger.log('ATENCAO: nao achei a aba de respostas, entao a aba PUBLICAR NAO foi criada.');
+    Logger.log('ATENCAO: nao achei a aba de respostas e a coluna "remover" nao foi criada.');
     Logger.log('         Rode esta mesma funcao de novo — nada e apagado. Se falhar duas vezes, me avise.');
   }
 }
@@ -243,7 +250,7 @@ function acharAbaDeRespostas(ss, nomeDaAbaPadrao) {
 
 /**
  * The owner's emergency brake: tick the box and the group leaves the map on the
- * next run (up to an hour). ADR-0006 removed the approval queue, so this is the only
+ * next successful publication. ADR-0006 removed the approval queue, so this is the only
  * control left — it has to exist before the first registration arrives, not
  * after the first problem.
  */
@@ -256,7 +263,7 @@ function acrescentarColunaRemover(aba) {
   var col = largura + 1;
   aba.getRange(1, col).setValue(COL_REMOVER);
   aba.getRange(1, col).setNote(
-    'Marque para tirar este grupo do mapa. Ele sai sozinho em até 1 hora.\n' +
+    'Marque para tirar este grupo do mapa. A publicação é pedida imediatamente; o cron é o plano B.\n' +
     'Desmarque para ele voltar. Nada é apagado da planilha.');
   // requireCheckbox() only VALIDATES the cell. insertCheckboxes() would stamp
   // FALSE into every empty row — a thousand rows of noise in the one file the
@@ -264,115 +271,6 @@ function acrescentarColunaRemover(aba) {
   var linhas = Math.max(aba.getMaxRows() - 1, 1);
   aba.getRange(2, col, linhas, 1).setDataValidation(
     SpreadsheetApp.newDataValidation().requireCheckbox().build());
-}
-
-/**
- * Builds the tab that gets published as CSV — the site's only input.
- *
- * Two deliberate choices, both of which cost a red CI to learn:
- *
- * - HEADERS ARE PLAIN TEXT IN ROW 1 and the formula lives in A2. The obvious
- *   alternative — one array literal stacking the headers over FILTER — breaks on
- *   the very day this is set up: with zero responses FILTER returns #N/A,
- *   IFERROR turns that into a single empty cell, and a 13-column row over a
- *   1-column row is an ARRAY_LITERAL error. The published CSV would then be the
- *   error text, which ingerir_csv.mjs correctly reads as "the wrong document was
- *   published" and aborts — a red build every 10 minutes between setup and the
- *   first registration. Split this way, the empty state publishes a header-only
- *   CSV: zero pins, green CI, exactly what an empty map should look like.
- *
- * - COLUMNS ARE READ AS WHOLE COLUMNS ($A:$ZZ), WITH NO ROW ANCHOR AT ALL, and
- *   the header row is dropped by an explicit condition rather than by starting
- *   the range at row 2. This is not a style choice: $A$2 DRIFTS. Google Forms
- *   delivers each answer by INSERTING a row, and an insert at row N pushes every
- *   absolute reference at or below N one row down — so $A$2 became $A$3 after
- *   the first registration and $A$4 after the second, sitting forever exactly
- *   one row below the newest answer and therefore matching NOTHING.
- *
- *   Measured on 25/08/2026, on the owner's live sheet: two registrations in the
- *   response tab, PUBLICAR empty, published CSV containing only its header row,
- *   zero pins on the site — and a green CI the whole time, because every file in
- *   this repository was doing exactly what it was told. A full-column reference
- *   has no row number left to shift, which is why the fix is the range and not
- *   a corrected row number: $A$2 typed in by hand would break again on the very
- *   next registration.
- *
- *   INDEX(range,0,n) returns the WHOLE column, header included, and the filter
- *   keeps every row whose "Nome do grupo" is not empty — which the header row
- *   satisfies. So the header is excluded BY NAME; without that condition the
- *   question titles publish themselves as a phantom registration.
- */
-function montarAbaPublicar(ss, respostas) {
-  var aba = ss.getSheetByName(ABA_PUBLICAR) || ss.insertSheet(ABA_PUBLICAR);
-  // A sheet name with spaces or an apostrophe has to be quoted inside a formula.
-  var ref = "'" + respostas.getSheetName().replace(/'/g, "''") + "'!";
-  // Columns are matched BY HEADER NAME, never by letter: inserting a question in
-  // the middle of the form later would otherwise slide every answer one column
-  // over, under the right heading, and nobody would notice.
-  // $A$1:$ZZ$1 keeps its row anchor on purpose: Forms only ever inserts at row
-  // 2 or below, so row 1 is the one row in the sheet that cannot be pushed down.
-  var coluna = function (titulo) {
-    return 'INDEX(' + ref + '$A:$ZZ,0,MATCH("' + titulo + '",' + ref + '$A$1:$ZZ$1,0))';
-  };
-
-  var nomes = COLUNAS.concat([COL_REMOVER]);
-  var expressoes = [];
-  for (var i = 0; i < COLUNAS.length; i++) expressoes.push(coluna(TITULOS[COLUNAS[i]]));
-  expressoes.push(coluna(COL_REMOVER));
-
-  var grupo = coluna(TITULOS.grupo);
-  aba.getRange(1, 1, 1, nomes.length).setValues([nomes]);
-  aba.getRange('A2').setFormula(
-    '=IFERROR(FILTER({' + expressoes.join(',') + '},' +
-    grupo + '<>"",' + grupo + '<>"' + TITULOS.grupo + '"),"")');
-  aba.setFrozenRows(1);
-  return aba;
-}
-
-/**
- * Repairs the PUBLICAR tab of a spreadsheet that ALREADY EXISTS — without
- * creating a second form.
- *
- * criarFormMovimenta7() is the launch-day function and it always builds a NEW
- * form and a NEW spreadsheet, so it is exactly the wrong tool once the form has
- * been shared: the owner would be left with two forms, and the one people
- * already have the link to would be the one nobody reads. This function touches
- * only the tab, on the sheet it is run from.
- *
- * HOW THE OWNER RUNS IT: open the RESPONSES SPREADSHEET > Extensões > Apps
- * Script, paste this whole file, pick `consertarAbaPublicar` in the function
- * list, Executar. Nothing is deleted: it rewrites one cell (PUBLICAR!A2) and the
- * header row, and adds the `remover` column only if it is missing.
- */
-function consertarAbaPublicar() {
-  var ss = SpreadsheetApp.getActive();
-  if (!ss) {
-    throw new Error('Rode esta funcao DE DENTRO da planilha de respostas ' +
-      '(planilha > Extensoes > Apps Script), nao de um script solto.');
-  }
-  var respostas = acharAbaDeRespostas(ss, 'Página1');
-  // acharAbaDeRespostas() falls back to "any tab wider than one column" when no
-  // header matches — which is right on creation day, when PUBLICAR does not
-  // exist yet, and WRONG here, where it does and is 13 columns wide. Without
-  // this guard the repair could hand PUBLICAR to itself as its own source: a
-  // circular reference, plus a 14th column bolted onto the published tab. So the
-  // header match is made mandatory on this path.
-  var cabecalho = respostas
-    ? respostas.getRange(1, 1, 1, Math.max(respostas.getLastColumn(), 1)).getValues()[0]
-    : [];
-  var temColunaDoGrupo = false;
-  for (var c = 0; c < cabecalho.length; c++) {
-    if (String(cabecalho[c]).trim() === TITULOS.grupo) temColunaDoGrupo = true;
-  }
-  if (!temColunaDoGrupo) {
-    throw new Error('Nao achei a aba de respostas nesta planilha: nenhuma aba tem a coluna "' +
-      TITULOS.grupo + '" na primeira linha. Esta e a planilha ligada ao formulario?');
-  }
-  acrescentarColunaRemover(respostas);
-  montarAbaPublicar(ss, respostas);
-  Logger.log('OK: aba PUBLICAR remontada a partir de "' + respostas.getSheetName() + '".');
-  Logger.log('    Os cadastros que ja estavam na planilha aparecem la agora.');
-  Logger.log('    Se a aba ja estava publicada na web, nao precisa republicar.');
 }
 
 /* ===========================================================================
@@ -394,12 +292,14 @@ function consertarAbaPublicar() {
  *     repository_dispatch -> Contents: WRITE
  *     workflow_dispatch   -> Actions: WRITE
  * Contents: write is permission to PUSH COMMITS, and on this project the
- * repository IS the website — a leaked token of that kind publishes anything it
- * likes to the map. Actions: write can only run or cancel a workflow that
- * already exists, so the worst it can do is republish the site with the content
- * already in it. The narrower door was also already open: ci.yml has carried
- * `workflow_dispatch:` since the beginning, so nothing in the workflow had to be
- * widened to make this work.
+ * repository IS the website — a leaked token of that kind publishes arbitrary
+ * repository content. Actions: write is narrower, but it is still powerful: it
+ * can dispatch workflows on refs and manage workflows, runs, logs, artifacts and
+ * caches. This repository reduces that impact by publishing only main and by
+ * putting deployment behind the github-pages Environment; neither control makes
+ * a leaked token harmless. The narrower door was already open: ci.yml has
+ * carried `workflow_dispatch:` since the beginning, so nothing in the workflow
+ * had to be widened to make this work.
  *
  * WHERE THE TOKEN LIVES: in Script Properties (Apps Script > Configurações do
  * projeto > Propriedades do script), inside the owner's Google account. NEVER in
@@ -409,8 +309,10 @@ function consertarAbaPublicar() {
  *
  * THE CRON STAYS ON, DELIBERATELY. Google disables triggers that fail too often,
  * a fine-grained token expires on its due date, and both happen quietly. If the
- * trigger dies, the site goes back to updating within the hour instead of not
- * updating at all. Belt and braces, not redundancy for its own sake.
+ * trigger dies, the scheduled workflow remains a fallback. GitHub may delay or
+ * drop scheduled runs and gives no maximum publication time, so this is graceful
+ * degradation rather than a delivery guarantee. Belt and braces, not redundancy
+ * for its own sake.
  */
 
 /** The site's repository. Only changes if the project moves accounts. */
@@ -419,18 +321,27 @@ var REPO_PADRAO = 'JorgeYuriDj/movimenta7';
 var WORKFLOW = 'ci.yml';
 /** Branch GitHub Pages publishes from. */
 var BRANCH = 'main';
-/** Handler the trigger calls; also the key used to avoid installing it twice. */
+/** Trigger handlers; names are also used to identify and deduplicate triggers. */
 var FUNCAO_DO_GATILHO = 'aoEnviarFormulario';
+var FUNCAO_GATILHO_EDICAO = 'aoEditarPlanilha';
+var FUNCAO_GATILHO_PENDENTE = 'publicarPendente_';
 
 var PROP_TOKEN = 'GITHUB_TOKEN';
 var PROP_REPO = 'GITHUB_REPO';
-var PROP_CSV = 'PLANILHA_CSV_URL';
-
-/* How long to wait for Google to republish the CSV before asking GitHub to
-   read it. See esperarOCsvMostrar_ for why waiting at all is the point. */
-var ESPERA_INICIAL_MS = 10000;
-var ESPERA_PASSO_MS = 15000;
-var ESPERA_TENTATIVAS = 8; // 10s + 8x15s = up to ~2min10 before giving up
+var PROP_PLANILHA_ID = 'MOV7_SPREADSHEET_ID';
+var PROP_FEED_TOKEN = 'MOV7_FEED_TOKEN';
+var PROP_OWNER_EMAIL = 'MOV7_OWNER_EMAIL';
+var PROP_ULTIMO_DISPARO = 'MOV7_LAST_DISPATCH_AT';
+var PROP_PUBLICACAO_PENDENTE = 'MOV7_DISPATCH_PENDING';
+var PROP_ULTIMO_ALERTA = 'MOV7_LAST_REMOVAL_ALERT_AT';
+var PROP_DIA_ALERTA = 'MOV7_REMOVAL_ALERT_DAY';
+var PROP_TENTATIVAS_ALERTA = 'MOV7_REMOVAL_ALERT_ATTEMPTS';
+var PROP_ERRO_ALERTA = 'MOV7_LAST_REMOVAL_ALERT_ERROR';
+var JANELA_DISPARO_MS = 60 * 1000;
+var JANELA_ALERTA_MS = 10 * 60 * 1000;
+var LIMITE_TENTATIVAS_ALERTA_DIA = 24;
+var RESERVA_EMAIL_DIARIA = 20;
+var FEED_SCHEMA_VERSION = 1;
 
 /**
  * Reads a Script Property, trimmed.
@@ -444,6 +355,202 @@ function propriedade_(nome, padrao) {
   var v = PropertiesService.getScriptProperties().getProperty(nome);
   v = v ? String(v).trim() : '';
   return v || padrao || '';
+}
+
+/* ===========================================================================
+ * PRIVATE FEED — the response spreadsheet never has to be "published on web"
+ * ===========================================================================
+ *
+ * GitHub reads this Web App with a secret in the POST body. The endpoint
+ * projects columns BY QUESTION TITLE from the private response sheet; removal
+ * requests and any future private column are never serialized. Community data
+ * still goes through the Node allowlist/PII gates before it reaches Pages.
+ */
+
+function respostaJson_(doc) {
+  return ContentService.createTextOutput(JSON.stringify(doc))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function tokenIgual_(recebido, esperado) {
+  recebido = String(recebido || '');
+  esperado = String(esperado || '');
+  var diferenca = recebido.length ^ esperado.length;
+  var maior = Math.max(recebido.length, esperado.length);
+  for (var i = 0; i < maior; i++) {
+    diferenca |= (recebido.charCodeAt(i) || 0) ^ (esperado.charCodeAt(i) || 0);
+  }
+  return diferenca === 0 && esperado.length >= 32;
+}
+
+function planilhaConfigurada_() {
+  var ativa = SpreadsheetApp.getActive();
+  if (ativa) return ativa;
+  var id = propriedade_(PROP_PLANILHA_ID, '');
+  if (!id) throw new Error('Falta a propriedade ' + PROP_PLANILHA_ID + '. Rode configurarFeedPrivado.');
+  return SpreadsheetApp.openById(id);
+}
+
+function acharAbaDeRespostasEstrita_(ss) {
+  var abas = ss.getSheets();
+  for (var i = 0; i < abas.length; i++) {
+    var largura = abas[i].getLastColumn();
+    if (largura < 1) continue;
+    var cabecalho = abas[i].getRange(1, 1, 1, largura).getDisplayValues()[0];
+    for (var c = 0; c < cabecalho.length; c++) {
+      if (String(cabecalho[c]).trim() === TITULOS.grupo) return abas[i];
+    }
+  }
+  return null;
+}
+
+function montarFeedPrivado_() {
+  var ss = planilhaConfigurada_();
+  var respostas = acharAbaDeRespostasEstrita_(ss);
+  if (!respostas) throw new Error('Nao achei a aba de respostas pelo cabecalho do grupo.');
+
+  var largura = respostas.getLastColumn();
+  var cabecalho = respostas.getRange(1, 1, 1, largura).getDisplayValues()[0];
+  var indice = {};
+  for (var i = 0; i < cabecalho.length; i++) indice[String(cabecalho[i]).trim()] = i;
+
+  var nomes = COLUNAS.concat([COL_REMOVER]);
+  var titulos = [];
+  for (var n = 0; n < COLUNAS.length; n++) titulos.push(TITULOS[COLUNAS[n]]);
+  titulos.push(COL_REMOVER);
+  for (var t = 0; t < titulos.length; t++) {
+    if (indice[titulos[t]] === undefined) {
+      throw new Error('Falta a coluna obrigatoria "' + titulos[t] + '" na planilha.');
+    }
+  }
+
+  var ultima = respostas.getLastRow();
+  var linhas = [];
+  if (ultima > 1) {
+    var valores = respostas.getRange(2, 1, ultima - 1, largura).getDisplayValues();
+    var colGrupo = indice[TITULOS.grupo];
+    for (var r = 0; r < valores.length; r++) {
+      if (!String(valores[r][colGrupo] || '').trim()) continue; // ramo corrigir/remover
+      var saida = [];
+      for (var j = 0; j < titulos.length; j++) saida.push(valores[r][indice[titulos[j]]] || '');
+      linhas.push(saida);
+      if (linhas.length > 5000) throw new Error('Mais de 5000 cadastros na origem — revise a planilha.');
+    }
+  }
+  return {
+    ok: true,
+    schema_version: FEED_SCHEMA_VERSION,
+    gerado_em: new Date().toISOString(),
+    colunas: nomes,
+    linhas: linhas,
+  };
+}
+
+/** Public health check: intentionally contains no spreadsheet data. */
+function doGet() {
+  return respostaJson_({ ok: true, servico: 'movimenta7-feed', schema_version: FEED_SCHEMA_VERSION });
+}
+
+/** Authenticated endpoint used only by GitHub Actions. */
+function doPost(e) {
+  try {
+    var p = e && e.parameter ? e.parameter : {};
+    if (p.acao !== 'feed' || !tokenIgual_(p.token, propriedade_(PROP_FEED_TOKEN, ''))) {
+      return respostaJson_({ ok: false, erro: 'acesso negado' });
+    }
+    return respostaJson_(montarFeedPrivado_());
+  } catch (err) {
+    // Never echo a cell or secret. GitHub's public log only needs the class.
+    return respostaJson_({ ok: false, erro: 'feed indisponivel' });
+  }
+}
+
+/**
+ * Migrates the already-published form by stable question title and item type.
+ * Exact matching avoids rewriting an unrelated field that happens to contain
+ * words such as "mapa", "social" or "remover" in its help text.
+ */
+function migrarCopyDoFormulario_(form) {
+  form.setDescription(descricaoDoFormulario_());
+  form.setConfirmationMessage(confirmacaoDoFormulario_());
+  form.setCollectEmail(false);
+  form.setLimitOneResponsePerUser(false);
+  // New Forms expose this switch separately from accepting responses. Keep the
+  // public responder link published, without reopening a form the owner may
+  // have intentionally paused.
+  if (typeof form.setPublished === 'function') form.setPublished(true);
+
+  var textos = form.getItems(FormApp.ItemType.TEXT);
+  for (var i = 0; i < textos.length; i++) {
+    var tituloTexto = textos[i].getTitle();
+    if (tituloTexto === TITULOS.rede_social) {
+      textos[i].asTextItem().setRequired(true).setHelpText(AJUDA_REDE_SOCIAL);
+    } else if (tituloTexto === TITULOS.mapa) {
+      textos[i].asTextItem().setRequired(true).setHelpText(AJUDA_MAPA);
+    }
+  }
+
+  var escolhas = form.getItems(FormApp.ItemType.MULTIPLE_CHOICE);
+  for (var j = 0; j < escolhas.length; j++) {
+    if (escolhas[j].getTitle() === TITULO_CONSENTIMENTO) {
+      escolhas[j].asMultipleChoiceItem().setRequired(true)
+        .setChoiceValues([TEXTO_CONSENTIMENTO]);
+    }
+  }
+
+  var paragrafos = form.getItems(FormApp.ItemType.PARAGRAPH_TEXT);
+  for (var p = 0; p < paragrafos.length; p++) {
+    if (paragrafos[p].getTitle() === TITULO_PEDIDO_PRIVADO) {
+      paragrafos[p].asParagraphTextItem().setRequired(true)
+        .setHelpText(AJUDA_PEDIDO_PRIVADO);
+    }
+  }
+
+  // Require both known sections before changing navigation. This repairs the
+  // old form where SUBMIT was attached to the cadastro break (the break BEFORE
+  // the registration page) and the registration page fell into removal.
+  var paginas = form.getItems(FormApp.ItemType.PAGE_BREAK);
+  var paginaCadastro = null;
+  var paginaRemocao = null;
+  for (var b = 0; b < paginas.length; b++) {
+    if (paginas[b].getTitle() === TITULO_PAGINA_CADASTRO) paginaCadastro = paginas[b].asPageBreakItem();
+    if (paginas[b].getTitle() === TITULO_PAGINA_REMOCAO) paginaRemocao = paginas[b].asPageBreakItem();
+  }
+  if (paginaCadastro && paginaRemocao) {
+    paginaCadastro.setGoToPage(FormApp.PageNavigationType.CONTINUE);
+    paginaRemocao.setGoToPage(FormApp.PageNavigationType.SUBMIT);
+  }
+}
+
+/** One-time setup. Safe to run again: existing secrets are never replaced. */
+function configurarFeedPrivado() {
+  var token = propriedade_(PROP_FEED_TOKEN, '');
+  if (token.length < 32) {
+    throw new Error(
+      'Antes de configurar o feed, crie a propriedade ' + PROP_FEED_TOKEN +
+      ' com um segredo de pelo menos 32 caracteres. O script nao gera nem exibe esse valor.');
+  }
+
+  // Works both in a bound script (active spreadsheet) and in the standalone
+  // project that created the form (stored spreadsheet id).
+  var ss = planilhaConfigurada_();
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty(PROP_PLANILHA_ID, ss.getId());
+  var respostas = acharAbaDeRespostasEstrita_(ss);
+  if (!respostas) throw new Error('Nao achei a aba de respostas pelo cabecalho do grupo.');
+  acrescentarColunaRemover(respostas);
+
+  var formUrl = ss.getFormUrl();
+  if (formUrl) {
+    var form = FormApp.openByUrl(formUrl);
+    migrarCopyDoFormulario_(form);
+  }
+
+  Logger.log('OK: planilha privada configurada; mapa e rede social agora sao obrigatorios.');
+  Logger.log('OK: ' + PROP_FEED_TOKEN + ' ja esta configurado; o valor nao sera exibido.');
+  var url = ScriptApp.getService().getUrl();
+  if (url) Logger.log('URL do App da Web (configure como PLANILHA_FEED_URL no GitHub): ' + url);
+  else Logger.log('AGORA: Implantar > Nova implantacao > App da Web > executar como voce > qualquer pessoa.');
 }
 
 /**
@@ -514,69 +621,7 @@ function explicarFalha_(codigo, repo) {
       'do arquivo .github/workflows/' + WORKFLOW + ', tambem da 422.';
   }
   return 'O GitHub respondeu ' + codigo + ' e a publicacao nao foi pedida. ' +
-    'O site ainda vai atualizar sozinho na proxima rodada do cron (ate 1 hora).';
-}
-
-/**
- * Waits for the published CSV to actually show the new registration.
- *
- * This is the whole difference between "instant" and "instant but wrong". The
- * site does not read the spreadsheet: it reads the CSV that Google republishes
- * from the PUBLICAR tab, and that republication is not instantaneous. Firing the
- * workflow the millisecond a response lands would frequently publish the map
- * WITHOUT the group that just registered — and then, because the run already
- * happened, the person would wait a full cron round anyway, having watched the
- * site update and not include them. Slower and more confusing than doing
- * nothing.
- *
- * So the wait is bounded and it ends early: as soon as the group's name appears
- * in the published CSV, the wait is over. If PLANILHA_CSV_URL is not set here,
- * or the name never shows up, it gives up and dispatches anyway — a possibly
- * early run is still better than no run, and the cron covers what is left.
- * Never throws: a flaky network must not stop the publication.
- */
-function esperarOCsvMostrar_(grupo) {
-  Utilities.sleep(ESPERA_INICIAL_MS);
-  var csv = propriedade_(PROP_CSV, '');
-  if (!csv || !grupo) return false;
-  for (var i = 0; i < ESPERA_TENTATIVAS; i++) {
-    if (csvJaMostra_(csv, grupo)) return true;
-    Utilities.sleep(ESPERA_PASSO_MS);
-  }
-  return false;
-}
-
-function csvJaMostra_(url, grupo) {
-  try {
-    // Same cache-buster ingerir_csv.mjs uses: the published URL is served from a
-    // ~5 minute cache, so without a parameter that changes we would keep reading
-    // the answer from before the registration and wait out the full loop.
-    var alvo = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
-    var resp = UrlFetchApp.fetch(alvo, {
-      muteHttpExceptions: true,
-      headers: { 'cache-control': 'no-cache', pragma: 'no-cache' },
-    });
-    if (resp.getResponseCode() !== 200) return false;
-    return resp.getContentText().indexOf(grupo) >= 0;
-  } catch (err) {
-    return false;
-  }
-}
-
-/**
- * The group name of the response that just arrived, or "" if unreadable.
- *
- * namedValues hands back a LIST per question (a checkbox answer has several),
- * so the name is the first entry. The Array check is not defensive padding: on
- * a bare string, `v[0]` is the first LETTER, and searching the published CSV for
- * "V" would match instantly and every time — the wait would always pass, which
- * looks exactly like working and is the failure this whole function guards.
- */
-function nomeDoGrupo_(e) {
-  if (!e || !e.namedValues) return '';
-  var v = e.namedValues[TITULOS.grupo];
-  if (!v) return '';
-  return String(Array.isArray(v) ? (v[0] || '') : v).trim();
+    'O cron continua como plano B, mas o GitHub nao garante o horario dessa rodada.';
 }
 
 /**
@@ -588,16 +633,248 @@ function nomeDoGrupo_(e) {
  * it — the answer is already recorded in the sheet before this runs, and the
  * cron publishes it either way.
  */
+function valorNomeado_(e, titulo) {
+  if (!e || !e.namedValues || !Object.prototype.hasOwnProperty.call(e.namedValues, titulo)) return '';
+  var valor = e.namedValues[titulo];
+  if (Object.prototype.toString.call(valor) === '[object Array]') valor = valor[0];
+  return String(valor || '').trim();
+}
+
+/** The private branch must alert the owner, but must never start a site build. */
+function ehPedidoCorrecaoRemocao_(e) {
+  return valorNomeado_(e, TITULO_ACAO) === ACAO_CORRIGIR_REMOVER;
+}
+
+function emailDoProprietario_() {
+  var configurado = propriedade_(PROP_OWNER_EMAIL, '');
+  if (configurado) return configurado;
+  var usuario = Session.getEffectiveUser();
+  return usuario ? String(usuario.getEmail() || '').trim() : '';
+}
+
+/**
+ * Sends a sanitized correction/removal alert within a conservative daily
+ * budget. The response already lives in the private sheet before this runs.
+ * Every failure therefore becomes a safe diagnostic property and a cooldown,
+ * never an exception storm that could disable the form trigger. The only value
+ * copied into the body is the private spreadsheet URL; submitted text is never
+ * read here, let alone forwarded by e-mail.
+ */
+function alertarPedidoPrivado_() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var agora = agoraMs_();
+    var ultimo = Number(propriedade_(PROP_ULTIMO_ALERTA, '0')) || 0;
+    if (ultimo && Math.max(0, agora - ultimo) < JANELA_ALERTA_MS) return 'agrupado';
+
+    var props = PropertiesService.getScriptProperties();
+    // Written before touching MailApp: missing authorization, quota exhaustion
+    // and transient service failures all receive the same anti-storm cooldown.
+    props.setProperty(PROP_ULTIMO_ALERTA, String(agora));
+
+    var dia = new Date(agora).toISOString().slice(0, 10);
+    var diaAnterior = propriedade_(PROP_DIA_ALERTA, '');
+    var tentativas = Number(propriedade_(PROP_TENTATIVAS_ALERTA, '0')) || 0;
+    if (diaAnterior !== dia) {
+      tentativas = 0;
+      props.setProperty(PROP_DIA_ALERTA, dia);
+      props.setProperty(PROP_TENTATIVAS_ALERTA, '0');
+    }
+    if (tentativas >= LIMITE_TENTATIVAS_ALERTA_DIA) {
+      props.setProperty(PROP_ERRO_ALERTA, 'limite_diario_local');
+      return 'limite_diario_local';
+    }
+    tentativas++;
+    props.setProperty(PROP_TENTATIVAS_ALERTA, String(tentativas));
+
+    try {
+      var destinatario = emailDoProprietario_();
+      if (!destinatario) {
+        props.setProperty(PROP_ERRO_ALERTA, 'sem_destinatario');
+        return 'sem_destinatario';
+      }
+      var url = planilhaConfigurada_().getUrl();
+      var restante = Number(MailApp.getRemainingDailyQuota());
+      if (!isFinite(restante) || restante <= RESERVA_EMAIL_DIARIA) {
+        props.setProperty(PROP_ERRO_ALERTA, 'quota_reservada');
+        return 'quota_reservada';
+      }
+      MailApp.sendEmail({
+        to: destinatario,
+        subject: 'movimenta7: pedido privado de correcao ou remocao',
+        body: url,
+      });
+      props.setProperty(PROP_ERRO_ALERTA, '');
+      return 'enviado';
+    } catch (err) {
+      // Do not persist or log the provider's message: it can contain addresses.
+      props.setProperty(PROP_ERRO_ALERTA, 'falha_envio');
+      return 'falha_envio';
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function origemDoGatilho_(gatilho) {
+  try {
+    return String(gatilho.getTriggerSourceId() || '');
+  } catch (err) {
+    return '';
+  }
+}
+
+/** Trigger identity is handler + event type + source id, never just its name. */
+function gatilhoCorresponde_(gatilho, funcao, tipo, origem) {
+  return gatilho.getHandlerFunction() === funcao &&
+    gatilho.getEventType() === tipo &&
+    origemDoGatilho_(gatilho) === String(origem || '');
+}
+
+/** Keeps the first exact trigger and deletes only exact duplicates. */
+function deduplicarGatilho_(funcao, tipo, origem) {
+  var gatilhos = ScriptApp.getProjectTriggers();
+  var primeiro = null;
+  for (var i = 0; i < gatilhos.length; i++) {
+    if (!gatilhoCorresponde_(gatilhos[i], funcao, tipo, origem)) continue;
+    if (!primeiro) primeiro = gatilhos[i];
+    else ScriptApp.deleteTrigger(gatilhos[i]);
+  }
+  return primeiro;
+}
+
+function removerGatilhosPendentes_() {
+  var gatilhos = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < gatilhos.length; i++) {
+    if (gatilhoCorresponde_(
+      gatilhos[i], FUNCAO_GATILHO_PENDENTE, ScriptApp.EventType.CLOCK, '')) {
+      ScriptApp.deleteTrigger(gatilhos[i]);
+    }
+  }
+}
+
+function garantirGatilhoPendente_(atrasoMs) {
+  if (deduplicarGatilho_(
+    FUNCAO_GATILHO_PENDENTE, ScriptApp.EventType.CLOCK, '')) return;
+  ScriptApp.newTrigger(FUNCAO_GATILHO_PENDENTE)
+    .timeBased()
+    .after(Math.max(Number(atrasoMs) || 0, 1000))
+    .create();
+}
+
+/** Isolated for deterministic tests and to keep all rate-limit math in one clock. */
+function agoraMs_() {
+  return new Date().getTime();
+}
+
+function salvarDisparo_(agora) {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty(PROP_ULTIMO_DISPARO, String(agora));
+  props.setProperty(PROP_PUBLICACAO_PENDENTE, '0');
+}
+
+/**
+ * Automatic events dispatch at most once per minute. Bursts set one trailing
+ * one-shot clock trigger, protected by a script lock so simultaneous form
+ * submissions cannot each create a workflow run.
+ */
+function solicitarPublicacao_() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var agora = agoraMs_();
+    var ultimo = Number(propriedade_(PROP_ULTIMO_DISPARO, '0')) || 0;
+    var decorrido = ultimo ? Math.max(0, agora - ultimo) : JANELA_DISPARO_MS;
+    if (ultimo && decorrido < JANELA_DISPARO_MS) {
+      PropertiesService.getScriptProperties().setProperty(PROP_PUBLICACAO_PENDENTE, '1');
+      garantirGatilhoPendente_(JANELA_DISPARO_MS - decorrido);
+      return false;
+    }
+
+    dispararPublicacao_();
+    salvarDisparo_(agora);
+    removerGatilhosPendentes_();
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Executes the one coalesced trailing publication, or reschedules if early. */
+function publicarPendente_() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    removerGatilhosPendentes_();
+    if (propriedade_(PROP_PUBLICACAO_PENDENTE, '0') !== '1') return false;
+
+    var agora = agoraMs_();
+    var ultimo = Number(propriedade_(PROP_ULTIMO_DISPARO, '0')) || 0;
+    var decorrido = ultimo ? Math.max(0, agora - ultimo) : JANELA_DISPARO_MS;
+    if (ultimo && decorrido < JANELA_DISPARO_MS) {
+      garantirGatilhoPendente_(JANELA_DISPARO_MS - decorrido);
+      return false;
+    }
+
+    dispararPublicacao_();
+    salvarDisparo_(agora);
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Manual and installation checks deliberately bypass automatic coalescing. */
+function publicarImediatamente_() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    dispararPublicacao_();
+    salvarDisparo_(agoraMs_());
+    removerGatilhosPendentes_();
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function aoEnviarFormulario(e) {
   SpreadsheetApp.flush();
-  esperarOCsvMostrar_(nomeDoGrupo_(e));
-  dispararPublicacao_();
-  Logger.log('OK: publicacao pedida ao GitHub.');
+  if (ehPedidoCorrecaoRemocao_(e)) {
+    var estadoAlerta = alertarPedidoPrivado_();
+    if (estadoAlerta === 'enviado') {
+      Logger.log('OK: proprietario avisado sobre pedido privado.');
+    } else if (estadoAlerta === 'agrupado') {
+      Logger.log('OK: pedido privado agrupado no alerta recente.');
+    } else {
+      Logger.log(
+        'ATENCAO: pedido privado continua na planilha; alerta nao enviado (' + estadoAlerta + ').');
+    }
+    return;
+  }
+  var enviada = solicitarPublicacao_();
+  Logger.log(enviada
+    ? 'OK: publicacao pedida ao GitHub.'
+    : 'OK: publicacao agrupada para o proximo minuto.');
+}
+
+/** The emergency checkbox is an edit, not a form submission; publish it too. */
+function aoEditarPlanilha(e) {
+  if (!e || !e.range || e.range.getRow() < 2) return;
+  var aba = e.range.getSheet();
+  var titulo = String(aba.getRange(1, e.range.getColumn()).getDisplayValue() || '').trim();
+  if (titulo !== COL_REMOVER) return;
+  SpreadsheetApp.flush();
+  var enviada = solicitarPublicacao_();
+  Logger.log(enviada
+    ? 'OK: alteracao em remover publicada no GitHub.'
+    : 'OK: alteracao em remover agrupada para o proximo minuto.');
 }
 
 /** Manual button: asks for a publication now, without waiting for anything. */
 function publicarAgora() {
-  dispararPublicacao_();
+  publicarImediatamente_();
   Logger.log('OK: pedido enviado. O site termina de publicar em cerca de 40 segundos.');
   Logger.log('    Acompanhe em: https://github.com/' + propriedade_(PROP_REPO, REPO_PADRAO) + '/actions');
 }
@@ -610,16 +887,12 @@ function publicarAgora() {
  * failing quietly at the first stranger's registration, weeks later, when the
  * only symptom is that the site feels slow again.
  *
- * Running it twice is safe. It never deletes a trigger (REGRA ZERO) and never
- * adds a second one: two triggers would mean two workflow runs per registration,
- * which is just noise in the owner's Actions tab.
+ * Running it twice is safe. It preserves triggers with a different identity
+ * and removes only duplicates with the same handler, event type and source id.
  */
 function instalarGatilhoDePublicacao() {
-  var ss = SpreadsheetApp.getActive();
-  if (!ss) {
-    throw new Error('Rode esta funcao DE DENTRO da planilha de respostas ' +
-      '(planilha > Extensoes > Apps Script), nao de um script solto.');
-  }
+  var ss = planilhaConfigurada_();
+  PropertiesService.getScriptProperties().setProperty(PROP_PLANILHA_ID, ss.getId());
   if (!propriedade_(PROP_TOKEN, '')) {
     throw new Error(
       'Antes de instalar o gatilho, guarde o token do GitHub: Apps Script > ' +
@@ -627,19 +900,20 @@ function instalarGatilhoDePublicacao() {
       'nome ' + PROP_TOKEN + '. Passo a passo: moderacao/COMO_LIGAR_A_PLANILHA.md, Parte 4.');
   }
 
-  var gatilhos = ScriptApp.getProjectTriggers();
-  var jaExiste = false;
-  for (var i = 0; i < gatilhos.length; i++) {
-    if (gatilhos[i].getHandlerFunction() === FUNCAO_DO_GATILHO) jaExiste = true;
-  }
-  if (jaExiste) {
-    Logger.log('OK: o gatilho ja estava instalado — nao criei um segundo.');
-  } else {
+  var id = ss.getId();
+  var temEnvio = deduplicarGatilho_(
+    FUNCAO_DO_GATILHO, ScriptApp.EventType.ON_FORM_SUBMIT, id);
+  var temEdicao = deduplicarGatilho_(
+    FUNCAO_GATILHO_EDICAO, ScriptApp.EventType.ON_EDIT, id);
+  if (!temEnvio) {
     ScriptApp.newTrigger(FUNCAO_DO_GATILHO).forSpreadsheet(ss).onFormSubmit().create();
-    Logger.log('OK: gatilho instalado. Cada cadastro novo passa a publicar sozinho.');
   }
+  if (!temEdicao) {
+    ScriptApp.newTrigger(FUNCAO_GATILHO_EDICAO).forSpreadsheet(ss).onEdit().create();
+  }
+  Logger.log('OK: gatilhos ativos — cadastro e caixinha remover publicam sozinhos.');
 
-  dispararPublicacao_();
+  publicarImediatamente_();
   Logger.log('OK: o GitHub aceitou um pedido de publicacao agora — o token funciona.');
   Logger.log('    Veja rodando em: https://github.com/' + propriedade_(PROP_REPO, REPO_PADRAO) + '/actions');
 }

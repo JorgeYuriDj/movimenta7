@@ -12,12 +12,17 @@
 > grupo estaria prometendo, em nome do projeto, algo que o projeto não faz. **Use este arquivo, não
 > aquele.**
 
+> **Atualização de 25/08/2026:** o
+> [ADR-0007](../adr/0007-feed-privado-e-atualizacao-automatica.md) tornou a origem privada de
+> ponta a ponta. Não publique aba em CSV; use os dois Environment secrets do feed autenticado.
+
 ## Antes de mandar o link — 2 coisas, nesta ordem
 
-1. **A variável `PLANILHA_CSV_URL` no GitHub precisa estar com a URL certa.**
-   Enquanto não estiver, ninguém aparece no mapa. Passo a passo:
-   [`moderacao/COMO_LIGAR_A_PLANILHA.md`](../../moderacao/COMO_LIGAR_A_PLANILHA.md), Parte 3.
-2. **O teste com 1 cadastro real** (Parte 4 do mesmo guia). O caminho planilha → site nunca rodou
+1. **`PLANILHA_FEED_URL` e `PLANILHA_FEED_TOKEN` precisam existir como Environment secrets do
+   ambiente `github-pages`.** Não use Repository secrets nem Variables. A planilha continua
+   privada. Passo a passo:
+   [`moderacao/COMO_LIGAR_A_PLANILHA.md`](../../moderacao/COMO_LIGAR_A_PLANILHA.md), Partes 1–4.
+2. **O teste com 1 cadastro real** (Parte 5 do mesmo guia). O caminho planilha → site nunca rodou
    com dado de verdade. Erro que só aparece com dado real, sem esse teste, aparece na frente de
    todo mundo ao mesmo tempo.
 
@@ -30,18 +35,20 @@ Formulário: https://docs.google.com/forms/d/e/1FAIpQLSfWpfsteBTzJ3_d4Y-JQjlb4IB
 > adventista do DF, aberto a toda Brasília.
 >
 > Sua igreja tem grupo de corrida, caminhada, vôlei, ciclismo, funcional ou trilha?
-> **Cadastre em 2 minutos e o grupo entra no mapa sozinho, em até 1 hora** — não tem
-> fila, não tem aprovação, não tem ninguém no meio.
+> **Cadastre em 2 minutos e acompanhe o mapa: normalmente o grupo aparece em cerca de 1 a 2
+> minutos** — não tem fila nem aprovação. Se o gatilho estiver indisponível, o agendamento
+> continua tentando, mas não tem prazo garantido pelo GitHub.
 >
 > 📋 Cadastrar: [LINK DO FORMULÁRIO]
 > 🗺️ Ver o mapa: https://jorgeyuridj.github.io/movimenta7/
 >
 > O cadastro **não pede nenhum dado pessoal** — nem nome, nem telefone, nem e-mail. É só sobre a
 > atividade: modalidade, região, dia, horário, local de encontro e o @ da rede social da igreja.
-> Tudo o que você preencher é público no mapa. 💚
+> Os dados válidos sobre a atividade ficam públicos no mapa. Não escreva nome de pessoa,
+> telefone, e-mail ou endereço de casa. 💚
 
 **O que mudar à vontade:** emoji, saudação, ordem. **O que não mudar:** as duas frases sobre não
-pedir dado pessoal e sobre tudo virar público. Elas são a promessa que o site faz por escrito em
+pedir dado pessoal e sobre os dados da atividade virarem públicos. Elas são a promessa que o site faz por escrito em
 [`index.html`](../../index.html) — se a divulgação prometer diferente, é o site que vira mentira.
 
 ## Instagram (stories + bio)
@@ -62,29 +69,38 @@ o mapa, não um número escolhido.
 ## As 4 perguntas que vão te fazer — respostas prontas
 
 **"Quem aprova o meu cadastro?"**
-Ninguém. Uma checagem automática confere que não passou dado pessoal nem link estranho, e o grupo
-entra no mapa na rodada seguinte — em até 1 hora.
+Ninguém. Uma checagem automática barra telefone, e-mail, CPF/CNPJ e links fora dos campos ou
+destinos permitidos. O normal é aparecer em cerca de 1 a 2 minutos. No fallback, execuções
+agendadas bem-sucedidas foram medidas entre 40 e 55 minutos, mas o GitHub não oferece prazo
+máximo.
 
 **"Cadastrei e não apareceu."**
-Três causas, nesta ordem: (1) ainda não passou 1 hora; (2) a pessoa usou o **formulário
-antigo** — ele continua ativo e ainda recebe respostas, mas elas nunca chegam ao mapa, então é
-refazer no link novo; (3) a checagem recusou o cadastro por ter telefone, e-mail ou nome de pessoa
-em algum campo — o log do GitHub diz a linha e o campo, nunca o conteúdo.
+Três causas, nesta ordem: (1) a publicação ainda está rodando — espere 2 minutos e atualize; se o
+gatilho falhar, o agendamento continua tentando, mas pode atrasar ou descartar uma rodada; (2) a
+pessoa usou o **formulário antigo** — ele continua ativo e ainda recebe respostas, mas elas nunca
+chegam ao mapa, então é refazer no link novo; (3) a checagem recusou o cadastro por telefone,
+e-mail, CPF/CNPJ, URL no
+campo errado ou informação obrigatória ausente — o log do GitHub diz a linha e o campo, nunca o
+conteúdo.
 
 **"Quero sair do mapa."**
-Mesmo formulário, opção "corrigir ou remover". Sai em até 24 horas. Você também tira na hora:
-marque a caixinha `remover` na linha do grupo, na planilha.
+Mesmo formulário, opção “corrigir ou remover”. O responsável marca `remover` na planilha e a
+retirada normalmente aparece em cerca de 1 a 2 minutos; o prazo de atendimento informado ao
+público continua sendo até 24 horas.
 
 **"Vocês guardam meus dados?"**
-Não há dado pessoal para guardar. O que é preenchido é sobre a atividade e sobre a
-igreja/organização, e é tudo público no mapa desde o primeiro minuto.
+O formulário não pede dado pessoal. O que é preenchido é sobre a atividade e a
+igreja/organização e vira público somente depois das checagens. Se alguém digitar dado pessoal no
+campo errado, a planilha privada evita uma origem pública paralela. Telefone, e-mail e CPF/CNPJ
+são barrados; nome pessoal e residência não são distinguíveis automaticamente de nome de grupo e
+local público, por isso são proibidos no Form e removidos quando identificados.
 
 ## O que NÃO prometer
 
-- ❌ "seus dados ficam protegidos com a moderação" — não existe moderação, e não existe dado
-  pessoal coletado. Prometer sigilo de uma coisa que não é coletada convida a pessoa a escrever
-  o telefone no campo errado.
+- ❌ "seus dados ficam protegidos com a moderação" — não existe fila de moderação, e o
+  formulário não pede dado pessoal. Prometer uma revisão humana que não existe convida a pessoa
+  a escrever o telefone no campo errado.
 - ❌ "a organização confere cada cadastro antes de publicar" — não confere. Quem cadastra é
   responsável pelo que escreveu, e o site diz isso.
-- ❌ agenda, lista com filtros, selo de confirmação, equipe nas corridas de rua — ainda não
-  existem. Ver as Fases 1 e 2 do [`PLANO_EXECUCAO.md`](PLANO_EXECUCAO.md).
+- ❌ agenda, selo de confirmação e equipe nas corridas de rua — ainda não existem. Ver as fases
+  futuras do [`PLANO_EXECUCAO.md`](PLANO_EXECUCAO.md).

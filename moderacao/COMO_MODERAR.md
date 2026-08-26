@@ -1,76 +1,103 @@
 # Como o mapa decide o que publica
 
-Desde 25/08/2026 (ADR-0006) **não existe fila de aprovação**: quem preenche o formulário
-entra no mapa sozinho, em cerca de 10 minutos. Este arquivo explica o que passa, o que não
-passa, e o que você faz quando precisa tirar algo do ar.
-
-> A versão anterior deste guia ensinava a copiar campo a campo para
-> `moderacao/aprovados.json`. **Esse caminho não existe mais.** Quem escreve esse arquivo
-> é `scripts/ingerir_csv.mjs`, a partir da planilha.
+Não existe fila de aprovação. A pessoa cadastra uma atividade, a checagem automática protege o
+site e o grupo entra normalmente em **cerca de 1 a 2 minutos**. O único controle cotidiano é a
+coluna `remover`.
 
 ## O caminho de um cadastro
 
-1. A pessoa preenche o **Google Form** — que **não pede nenhum dado pessoal**.
-2. A resposta cai na planilha, e a aba **PUBLICAR** mostra só as colunas públicas.
-3. A cada ~10 minutos o GitHub lê essa aba e roda as checagens automáticas.
-4. O que passa vira pin. O que não passa fica de fora, com o motivo escrito no log.
+1. A pessoa preenche o Google Form, que não pede nome, telefone, e-mail ou CREF.
+2. A resposta fica na planilha privada. Nenhuma aba é publicada na web.
+3. O Apps Script avisa o GitHub imediatamente; o cron de 10 minutos é só reserva.
+4. O GitHub lê um feed privado autenticado, normaliza e verifica cada campo.
+5. O snapshot sanitizado vira mapa e lista. A página procura atualizações a cada 60 segundos e
+   quando volta ao foco.
 
-## O que a checagem automática recusa
+O processo normal leva ~40 segundos no GitHub mais o tempo de atualização do navegador. Se o
+gatilho falhar, o cron pode entrar na fila. Execuções agendadas bem-sucedidas foram medidas entre
+40 e 55 minutos, mas isso não é prazo máximo: o GitHub pode atrasar ou descartar uma rodada.
 
-Um cadastro **não entra** (e só ele; o resto do mapa continua normal) quando algum campo tem:
+## O que a checagem recusa
 
-| O quê | Como é detectado |
+Um cadastro não entra — só ele; o resto do mapa continua — quando houver:
+
+| O quê | Como é tratado |
 |---|---|
-| telefone | qualquer formato brasileiro, inclusive dentro de link |
-| e-mail | padrão `alguem@algumlugar.com` |
-| CPF ou CNPJ | **dígito verificador conferido** — quase nunca dá alarme falso |
-| link em campo que não é de link | uma URL escondida no nome do grupo, no local etc. |
-| região que o mapa não conhece | comparada com `data/regioes.json` |
-| cadastro sem nome de grupo ou sem região | não dá para desenhar |
-| cadastro repetido | mesmo grupo + região + local entram uma vez só |
+| telefone, e-mail, CPF ou CNPJ | detectado após normalização, inclusive em grafia Unicode disfarçada |
+| URL em campo de texto | recusada fora dos dois campos próprios de link |
+| rede social ou mapa ausentes/inválidos | o cadastro inteiro fica em quarentena; os dois links são obrigatórios |
+| grupo ou região ausentes | não há informação mínima para publicar |
+| região desconhecida | comparada com a lista e o mapa oficiais do projeto |
+| cadastro repetido | mesma combinação de grupo, região e local entra uma vez |
 
-E **o link recusado custa só o link**: se o endereço da rede social ou do mapa não estiver
-na lista de destinos aceitos, o grupo entra no mapa assim mesmo, sem o botão.
+Espaços invisíveis são removidos, texto é normalizado e campos públicos têm limite. O log informa
+linha, campo e classe do problema, mas nunca repete o conteúdo digitado.
 
-### Os destinos aceitos nos dois campos de link
+Rede social e mapa são partes obrigatórias do cadastro. Se qualquer um dos dois estiver ausente
+ou for inválido, o cadastro inteiro não vira pin nem item da lista. Os destinos permitidos são:
 
-- **rede social:** Instagram, Facebook, Threads, YouTube, TikTok, Twitter/X, Strava
-  (ou só o `@` — vira Instagram)
-- **mapa:** `maps.app.goo.gl`, `maps.google.com`, `google.com/maps`, `goo.gl/maps`,
-  OpenStreetMap
+- **rede social:** Instagram, Facebook, Threads, YouTube, TikTok, Twitter/X e Strava; um `@`
+  simples vira perfil do Instagram;
+- **mapa:** Google Maps e OpenStreetMap nos hosts e caminhos definidos pela allowlist.
 
-Fora disso, não vira link. **WhatsApp saiu da lista de propósito** — o número de telefone
-fica dentro da própria URL (`wa.me/5561...`), então publicá-lo seria publicar o telefone.
+WhatsApp não é aceito: o telefone fica embutido na URL.
 
-## O que você faz (e só quando precisar)
+### O limite que precisa ser dito com clareza
 
-**Tirar um grupo do ar:** marque a caixinha `remover` na linha dele, na planilha. Sai na
-rodada seguinte, em até ~10 minutos. É o mesmo caminho para pedido de remoção que chegou
-pelo formulário, para cadastro falso e para grupo que acabou.
+Não existe detector confiável que separe “nome de pessoa” de “nome do grupo/igreja”, nem
+“endereço de residência” de “endereço de local público”. O formulário **não pede** esses dados e
+manda não escrevê-los, mas o gate não pode prometer reconhecê-los pelo texto. Se você encontrar
+um nome pessoal ou residência no mapa, marque `remover` imediatamente e não copie o conteúdo
+para issue ou log público.
 
-Não existe passo "aprovar". Não existe `git push` para publicar cadastro.
+## Como a posição é escolhida
+
+O formulário exige o link do Google Maps. Ainda assim, “link recebido” e “coordenada exata” não
+são a mesma coisa:
+
+- se latitude e longitude aparecem na URL ou no redirecionamento de um link curto, e o ponto cai
+  dentro do polígono do DF, o pin é **exato**;
+- se não for possível confirmar coordenadas, o pin usa um ponto representativo da região e é
+  exibido como **aproximado**;
+- se uma coordenada confirmada cai fora do polígono do DF, o cadastro inteiro fica em quarentena:
+  não há rota, pin nem item na lista;
+- se a região escolhida diverge de uma coordenada válida dentro do DF, vale o link e o rótulo da
+  região é corrigido.
+
+O robô nunca procura coordenadas no corpo da página do Google, porque essa página pode ser
+genérica. Links curtos são resolvidos quando necessário e o resultado é reaproveitado do cache
+por hash enquanto ele existir. Vários grupos podem usar a mesma igreja, parque ou quadra;
+coordenadas repetidas são preservadas.
+
+## O que você faz quando precisar
+
+**Retirar:** marque `remover` na linha da resposta. A edição dispara a publicação, e o grupo sai
+normalmente em cerca de 1 a 2 minutos.
+
+**Corrigir:** marque a linha antiga como `remover` e peça um novo cadastro. Não edite
+`moderacao/aprovados.json` ou `data/snapshot.json`: respostas externas não devem entrar no
+histórico do Git.
+
+**Denúncia recebida pelo formulário:** confira a referência no ramo de correção/remoção e aplique
+o mesmo procedimento. Esse ramo fica fora do feed e não pode virar pin.
 
 ## O que é público
 
-Tudo o que o formulário pergunta na página de cadastro:
+Somente dados sobre a atividade e a organização:
 
-nome do grupo · igreja/organização · região · modalidades · dias · horário · local público
-de encontro · custo · para quem é aberto · se há profissional de educação física
-acompanhando · @ da rede social · link do mapa
+nome do grupo · igreja/organização · região · modalidades · dias · horário · local público ·
+tipo de atividade · custo · público atendido · rede social · rota · posição exata ou aproximada
 
-**Nada além disso é coletado.** Não há nome de pessoa, telefone nem e-mail na planilha —
-e o que não é coletado não pode vazar.
+O formulário não pede dado pessoal. Telefone, e-mail, CPF/CNPJ e URL fora do lugar são barrados
+antes do snapshot. Nome pessoal e residência dependem da proibição explícita no Form e da
+retirada reativa descrita acima; a planilha privada evita que o texto cru vire uma fonte pública
+paralela ao site.
 
-## Se der erro
+## Erro de cadastro × erro estrutural
 
-Os erros aparecem no log do GitHub (Actions > **ci e publicacao**), em português. Eles têm
-duas gravidades bem diferentes:
+- **`AVISO: linha N ...`** — um cadastro foi isolado; o restante publicou.
+- **`INGESTAO ABORTADA` / `PUBLICACAO ABORTADA` / `SNAPSHOT REPROVADO`** — a origem ou o contrato
+  está errado; nada novo é publicado e a versão anterior continua no ar.
 
-- **`AVISO: linha N ...`** — um cadastro ficou de fora. O site publicou o resto normalmente.
-  A mensagem diz a linha e o campo, e **nunca** o conteúdo (o log é público).
-- **`INGESTAO ABORTADA` / `PUBLICACAO ABORTADA` / `SNAPSHOT REPROVADO`** — nada foi
-  publicado e **o site anterior continua no ar, intacto**. É sinal de planilha errada
-  publicada ou de bug no código, não de um cadastro ruim.
-
-Para conferir na sua máquina: `node scripts/valida_snapshot.mjs`. O mesmo teste roda no CI,
-e gate vermelho **não sobe** (`needs: qa` em `.github/workflows/ci.yml`).
+Para conferir localmente: `node scripts/valida_snapshot.mjs`. O mesmo gate roda antes do deploy,
+junto com testes, contraste e proteção contra `innerHTML` em popup.

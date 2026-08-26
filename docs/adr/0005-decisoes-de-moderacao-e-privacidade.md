@@ -7,6 +7,11 @@
   4 frentes + 3 céticos adversariais. As quatro perguntas estão em `decisoes_para_o_dono`.
 - **Relacionados:** ADR-0002 (Write-Audit-Publish), ADR-0004 (segurança/LGPD).
 
+> **Documento histórico:** a decisão 1 continua válida. As decisões 2, 3 e 4 foram substituídas
+> pelo [ADR-0006](0006-publicacao-automatica-sem-dado-pessoal.md): não se publica WhatsApp ou CREF,
+> e não existe fila de aprovação. O [ADR-0007](0007-feed-privado-e-atualizacao-automatica.md)
+> esclarece que respostas são processadas no runner e não são commitadas ao histórico do Git.
+
 ## Contexto
 
 A pesquisa aprovou a espinha do desenho de moderação automatizada, mas deixou quatro

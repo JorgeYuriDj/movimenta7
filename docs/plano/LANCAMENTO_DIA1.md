@@ -5,6 +5,8 @@
 > mais fila de aprovação (`APROVADO=SIM`), não há botão de WhatsApp e o formulário **não coleta
 > nenhum dado pessoal**. Em particular, o aviso de privacidade no fim desta página — *"seu nome e
 > telefone pessoais ficam privados com a moderação"* — **hoje é falso**.
+> O [ADR-0007](../adr/0007-feed-privado-e-atualizacao-automatica.md) também proibiu publicar a
+> planilha em CSV: a origem atual é privada, autenticada e processada no GitHub antes do mapa.
 > **Para divulgar, use [`DIVULGACAO.md`](DIVULGACAO.md).** Este arquivo fica como registro do que
 > foi planejado no dia 23.
 

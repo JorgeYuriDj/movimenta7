@@ -40,6 +40,11 @@ Ligar a planilha e reimplantar uma **Nova versão** do Web App quando `scripts/c
 mudar: [`moderacao/COMO_LIGAR_A_PLANILHA.md`](moderacao/COMO_LIGAR_A_PLANILHA.md).
 O que passa e o que não passa: [`moderacao/COMO_MODERAR.md`](moderacao/COMO_MODERAR.md).
 
+Registro factual da entrega, incidentes e provas de produção:
+[`docs/REGISTRO_ENTREGA_PRODUCAO_2026-08-26.md`](docs/REGISTRO_ENTREGA_PRODUCAO_2026-08-26.md).
+Molde reutilizável para sistemas semelhantes:
+[`docs/BLUEPRINT_MAPA_COMUNITARIO_AUTOMATICO.md`](docs/BLUEPRINT_MAPA_COMUNITARIO_AUTOMATICO.md).
+
 > Não publique a planilha na web e não edite `moderacao/aprovados.json` à mão. Respostas são
 > processadas no runner e não entram por commit no histórico público. A configuração única e a
 > retirada segura da origem CSV antiga estão no guia acima.
@@ -49,4 +54,5 @@ O que passa e o que não passa: [`moderacao/COMO_MODERAR.md`](moderacao/COMO_MOD
 - Lançamento (Fase 0): [`docs/plano/LANCAMENTO_DIA1.md`](docs/plano/LANCAMENTO_DIA1.md) — datado
   de 23/08, desenho antigo; ver o aviso no topo
 - Decisões técnicas (ADRs): [`docs/adr/`](docs/adr/)
+- Leaflet 1.9.4 self-hosted e licença: [`vendor/leaflet/`](vendor/leaflet/)
 - Estrutura herdada de: `mapa-embaixadores-2026` (site estático, GitHub Pages)

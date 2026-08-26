@@ -22,9 +22,13 @@ Evidências da entrega:
 
 - PR principal: [#1 — entrega mapa automático seguro](https://github.com/JorgeYuriDj/movimenta7/pull/1), merge `29ad63b`.
 - PR do incidente visual: [#2 — corrige carregamento do mapa](https://github.com/JorgeYuriDj/movimenta7/pull/2), merge `3ff4d2b`.
-- Suíte final, após suporte seguro e posicionamento preciso de `share.google`: **145/145 testes**, contraste e gate
+- Registro/blueprint reutilizável: [#3](https://github.com/JorgeYuriDj/movimenta7/pull/3), merge `4482c0c`.
+- Suporte seguro ao compartilhamento do aplicativo Google: [#4](https://github.com/JorgeYuriDj/movimenta7/pull/4), merge `a13359b`.
+- Posição precisa para local comprovado por `share.google`: [#5](https://github.com/JorgeYuriDj/movimenta7/pull/5), merge `b13a82c`.
+- Modalidades abertas, com 16 atalhos e “Outro” digitável: [#6](https://github.com/JorgeYuriDj/movimenta7/pull/6), merge `33997b6`.
+- Suíte final: **145/145 testes**, contraste e gate
   anti-HTML cru aprovados.
-- QA e CodeQL aprovados antes das duas mesclas.
+- QA e CodeQL aprovados antes de todas as mesclas funcionais.
 - Envio real do Form disparou `workflow_dispatch`; o snapshot passou de 1 para 2 registros.
 - Chrome limpo em produção confirmou `leaflet-container`, mapa no estado `pronto`, dois grupos e
   o cadastro de teste visível, sem botão de erro.

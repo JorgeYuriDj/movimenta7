@@ -59,6 +59,10 @@ são a mesma coisa:
 
 - se latitude e longitude aparecem na URL ou no redirecionamento de um link curto, e o ponto cai
   dentro do polígono do DF, o pin é **exato**;
+- quando um `share.google` comprova um resultado de local mas não revela coordenadas, o nome
+  público é consultado no OpenStreetMap/Nominatim, limitado ao DF. O resultado só é usado quando
+  pelo menos dois termos conferem e o país é Brasil; consultas são identificadas, limitadas a uma
+  por segundo e reaproveitadas do cache;
 - se não for possível confirmar coordenadas, o pin usa um ponto representativo da região e é
   exibido como **aproximado**;
 - se uma coordenada confirmada cai fora do polígono do DF, o cadastro inteiro fica em quarentena:
@@ -66,9 +70,10 @@ são a mesma coisa:
 - se a região escolhida diverge de uma coordenada válida dentro do DF, vale o link e o rótulo da
   região é corrigido.
 
-O robô nunca procura coordenadas no corpo da página do Google, porque essa página pode ser
-genérica. Links curtos são resolvidos quando necessário e o resultado é reaproveitado do cache
-por hash enquanto ele existir. Vários grupos podem usar a mesma igreja, parque ou quadra;
+O robô nunca procura coordenadas no corpo da página do Google, porque medições reais mostraram
+que ela devolve a mesma posição genérica para lugares diferentes. Links curtos e geocodificação
+são resolvidos quando necessário e o resultado é reaproveitado do cache por hash enquanto ele
+existir. Vários grupos podem usar a mesma igreja, parque ou quadra;
 coordenadas repetidas são preservadas.
 
 ## O que você faz quando precisar

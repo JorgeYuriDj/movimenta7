@@ -22,7 +22,7 @@ Evidências da entrega:
 
 - PR principal: [#1 — entrega mapa automático seguro](https://github.com/JorgeYuriDj/movimenta7/pull/1), merge `29ad63b`.
 - PR do incidente visual: [#2 — corrige carregamento do mapa](https://github.com/JorgeYuriDj/movimenta7/pull/2), merge `3ff4d2b`.
-- Suíte final, após suporte seguro a `share.google`: **142/142 testes**, contraste e gate
+- Suíte final, após suporte seguro e posicionamento preciso de `share.google`: **145/145 testes**, contraste e gate
   anti-HTML cru aprovados.
 - QA e CodeQL aprovados antes das duas mesclas.
 - Envio real do Form disparou `workflow_dispatch`; o snapshot passou de 1 para 2 registros.
@@ -131,6 +131,7 @@ respostas cruas não devem estar nele.
 | Aba aberta não via cadastro novo | snapshot era buscado somente no boot | polling compartilhado por minuto, foco/visibilidade e ciclo curto após cadastro | teste de contrato do frontend |
 | Falha do snapshot parecia “mapa sem grupos” | estados vazio e indisponível eram misturados | estados separados, botão de tentar, lista preservada | UI usa `aria-live`, `aria-busy` e mensagens honestas |
 | Link copiado pelo aplicativo Google (`share.google/...`) não entrou | a allowlist conhecia o compartilhamento próprio do Maps, mas não o encurtador geral do aplicativo Google | seguir somente redirects Google e converter resultados comprovados de local em URL canônica do Maps | destino externo, artigo, imagem, metadata e `share.google` não resolvido são recusados; exemplo real e cache cobertos por testes |
+| Rota do `share.google` ficou correta, mas o pin apareceu longe | o redirecionamento identificava o lugar sem coordenadas; o fallback colocou o pin no centro da região, e o HTML do Google devolvia uma coordenada genérica comprovadamente errada | geocodificar somente o nome público já comprovado, no Nominatim limitado ao DF; o Skatepark foi encontrado em `-15.8818071,-48.0827960` | correspondência mínima de dois termos, país Brasil, caixa e polígono do DF, 1 consulta/s, teto de resposta, cache por hash e testes de respostas vagas/externas/malformadas |
 
 O incidente do SRI mostrou duas regras práticas: **segurança que bloqueia é melhor que segurança
 decorativa** e **teste que só inspeciona texto não substitui um navegador real**. O site degradou

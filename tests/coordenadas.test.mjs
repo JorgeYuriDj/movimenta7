@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   coordenadaDeUrl, resolverCoordenada, regiaoDaCoordenada, dentroDoDF,
-  coordenadasCompartilhadas, resolverCompartilhamentoGoogle,
+  coordenadasCompartilhadas, geocodificarLocalPublico, resolverCompartilhamentoGoogle,
 } from "../scripts/coordenadas.mjs";
 
 const GEO = JSON.parse(readFileSync(new URL("../data/ra_df.geojson", import.meta.url), "utf8"));
@@ -21,6 +21,14 @@ const GEO = JSON.parse(readFileSync(new URL("../data/ra_df.geojson", import.meta
 /** Resposta falsa de rede: um redirect, ou o fim da linha. */
 const salto = (destino) => ({ headers: { get: (h) => (h === "location" ? destino : null) } });
 const semSalto = { headers: { get: () => null } };
+const respostaJson = (valor) => {
+  const bytes = new TextEncoder().encode(JSON.stringify(valor));
+  return {
+    ok: true,
+    headers: { get: (h) => h === "content-length" ? String(bytes.byteLength) : "application/json" },
+    arrayBuffer: async () => bytes.buffer,
+  };
+};
 
 // ---------- lendo a coordenada de um link ----------
 
@@ -100,8 +108,58 @@ test("a share.google place is proven and converted to a canonical Maps route", a
   });
   assert.deepEqual(r, {
     mapa: "https://www.google.com/maps/search/?api=1&query=Skatepark+Samambaia",
+    consulta: "Skatepark Samambaia",
   });
   assert.deepEqual(chamadas, [inicial, intermediario]);
+});
+
+test("a proven public place name is geocoded inside the DF with strict request policy", async () => {
+  let chamada;
+  const r = await geocodificarLocalPublico("Skatepark Samambaia", "Samambaia", {
+    buscar: async (url, opcoes) => {
+      chamada = { url: new URL(url), opcoes };
+      return respostaJson([{
+        lat: "-15.8818071",
+        lon: "-48.0827960",
+        display_name: "Skatepark Samambaia, Samambaia, Distrito Federal, Brasil",
+        address: { country_code: "br" },
+      }]);
+    },
+  });
+  assert.deepEqual(r, { lat: -15.8818071, lon: -48.082796, fonte: "nominatim" });
+  assert.equal(chamada.url.hostname, "nominatim.openstreetmap.org");
+  assert.equal(chamada.url.pathname, "/search");
+  assert.equal(chamada.url.searchParams.get("bounded"), "1");
+  assert.equal(chamada.url.searchParams.get("countrycodes"), "br");
+  assert.match(chamada.url.searchParams.get("q"), /Skatepark Samambaia, Samambaia/);
+  assert.match(chamada.opcoes.headers["user-agent"], /^movimenta7\/1\.0/);
+  assert.equal(chamada.opcoes.redirect, "error");
+});
+
+test("geocoding refuses vague, mismatched, foreign, oversized and malformed answers", async () => {
+  let chamadas = 0;
+  const naoConsulta = async () => { chamadas++; return respostaJson([]); };
+  assert.equal(await geocodificarLocalPublico("Parque", "Samambaia", { buscar: naoConsulta }), null);
+  assert.equal(chamadas, 0, "uma consulta vaga chegou ao servico externo");
+
+  for (const resposta of [
+    [{ lat: "-15.88", lon: "-48.08", display_name: "Outro lugar, Samambaia", address: { country_code: "br" } }],
+    [{ lat: "-15.88", lon: "-48.08", display_name: "Skatepark Samambaia", address: { country_code: "us" } }],
+    [{ lat: "-23.55", lon: "-46.63", display_name: "Skatepark Samambaia", address: { country_code: "br" } }],
+  ]) {
+    assert.equal(await geocodificarLocalPublico("Skatepark Samambaia", "Samambaia", {
+      buscar: async () => respostaJson(resposta),
+    }), null);
+  }
+
+  const enorme = new Uint8Array(64 * 1024 + 1);
+  assert.equal(await geocodificarLocalPublico("Skatepark Samambaia", "Samambaia", {
+    buscar: async () => ({
+      ok: true,
+      headers: { get: () => String(enorme.byteLength) },
+      arrayBuffer: async () => enorme.buffer,
+    }),
+  }), null);
 });
 
 test("share.google never becomes a general-purpose or unsafe redirect", async () => {
@@ -371,7 +429,7 @@ test("a registration with a search link keeps no position at all", async () => {
 
 test("a short Maps link is resolved once and reused from the private cache", async () => {
   const { completarCoordenadas } = await import("../scripts/ingerir_csv.mjs");
-  const cache = { versao: 2, itens: {} };
+  const cache = { versao: 3, itens: {} };
   let chamadas = 0;
   const buscar = async () => {
     chamadas++;
@@ -406,11 +464,17 @@ test("a share.google registration is kept only after its place destination is pr
     "&q=Skatepark+Samambaia&source=sh%2Fx%2Floc%2Fact%2Fm1%2F2";
   let chamadas = 0;
   const resolucao = await completarCoordenadas(registros, {
-    cache: { versao: 2, itens: {} },
+    cache: { versao: 3, itens: {} },
     buscar: async (url) => {
       chamadas++;
       if (url === inicial) return salto(intermediario);
       if (url === intermediario) return salto(destino);
+      if (new URL(url).hostname === "nominatim.openstreetmap.org") return respostaJson([{
+        lat: "-15.8818071",
+        lon: "-48.0827960",
+        display_name: "Skatepark Samambaia, Samambaia, Distrito Federal, Brasil",
+        address: { country_code: "br" },
+      }]);
       return semSalto;
     },
     agora: () => "2026-08-26T04:00:00.000Z",
@@ -418,7 +482,9 @@ test("a share.google registration is kept only after its place destination is pr
   assert.equal(registros.length, 1);
   assert.equal(registros[0].mapa,
     "https://www.google.com/maps/search/?api=1&query=Skatepark+Samambaia");
-  assert.equal(chamadas, 2);
+  assert.equal(registros[0].lat, -15.8818071);
+  assert.equal(registros[0].lon, -48.082796);
+  assert.equal(chamadas, 3);
 
   const repetido = [{ grupo: "Outro", mapa: inicial }];
   await completarCoordenadas(repetido, { cache: resolucao.cache, buscar: async () => {
@@ -426,7 +492,49 @@ test("a share.google registration is kept only after its place destination is pr
   } });
   assert.equal(repetido[0].mapa,
     "https://www.google.com/maps/search/?api=1&query=Skatepark+Samambaia");
-  assert.equal(chamadas, 2, "o destino share.google comprovado nao veio do cache");
+  assert.equal(repetido[0].lat, -15.8818071);
+  assert.equal(chamadas, 3, "o destino share.google comprovado nao veio do cache");
+});
+
+test("multiple place geocodes are serialized to at most one request per second", async () => {
+  const { completarCoordenadas } = await import("../scripts/ingerir_csv.mjs");
+  const registros = [
+    { grupo: "A", regiao: "Samambaia", mapa: "https://share.google/TokenSeguroA1" },
+    { grupo: "B", regiao: "Samambaia", mapa: "https://share.google/TokenSeguroB2" },
+  ];
+  const pausas = [];
+  const buscar = async (url) => {
+    const p = new URL(url);
+    if (p.hostname === "share.google") {
+      const token = p.pathname.slice(1);
+      return salto(`https://www.google.com/share.google?q=${token}`);
+    }
+    if (p.pathname === "/share.google") {
+      const token = p.searchParams.get("q");
+      const nome = token === "TokenSeguroA1" ? "Skatepark Samambaia" : "Parque Tres Meninas";
+      return salto("https://www.google.com/search?kgmid=%2Fg%2F11local" +
+        `&q=${encodeURIComponent(nome)}&source=sh%2Fx%2Floc%2Fact%2Fm1%2F2`);
+    }
+    if (p.hostname === "nominatim.openstreetmap.org") {
+      const nome = p.searchParams.get("q").split(",", 1)[0];
+      return respostaJson([{
+        lat: nome === "Skatepark Samambaia" ? "-15.8818071" : "-15.8700000",
+        lon: nome === "Skatepark Samambaia" ? "-48.0827960" : "-48.0900000",
+        display_name: `${nome}, Samambaia, Distrito Federal, Brasil`,
+        address: { country_code: "br" },
+      }]);
+    }
+    return semSalto;
+  };
+
+  await completarCoordenadas(registros, {
+    cache: { versao: 3, itens: {} },
+    buscar,
+    relogio: () => 10_000,
+    pausar: async (ms) => pausas.push(ms),
+  });
+  assert.deepEqual(pausas, [1000]);
+  assert.equal(registros.every((r) => Number.isFinite(r.lat) && Number.isFinite(r.lon)), true);
 });
 
 test("a generic share.google destination is quarantined without blocking other groups", async () => {
@@ -441,7 +549,7 @@ test("a generic share.google destination is quarantined without blocking other g
   console.warn = (msg) => avisos.push(String(msg));
   try {
     await completarCoordenadas(registros, {
-      cache: { versao: 2, itens: {} },
+      cache: { versao: 3, itens: {} },
       buscar: async (url) => url === token
         ? salto("https://www.google.com/share.google?q=LinkGenerico123")
         : salto("https://example.com/artigo"),
@@ -456,7 +564,7 @@ test("a generic share.google destination is quarantined without blocking other g
 
 test("a transient short-link failure expires instead of making the pin approximate forever", async () => {
   const { completarCoordenadas } = await import("../scripts/ingerir_csv.mjs");
-  const cache = { versao: 2, itens: {} };
+  const cache = { versao: 3, itens: {} };
   let chamadas = 0;
   const falha = async () => { chamadas++; return semSalto; };
   const link = "https://maps.app.goo.gl/transitorio";

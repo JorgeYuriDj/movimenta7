@@ -1,0 +1,4 @@
+# Vendored Leaflet assets have Subresource Integrity hashes. Git must preserve
+# their audited bytes exactly; line-ending normalization would change the hash.
+vendor/leaflet/leaflet.css -text
+vendor/leaflet/leaflet.js -text

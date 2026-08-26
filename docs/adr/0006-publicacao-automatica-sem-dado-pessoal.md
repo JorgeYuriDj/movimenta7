@@ -3,9 +3,18 @@
 - **Data:** 25/08/2026
 - **Status:** aceito
 - **Quem decidiu:** Jorge Yuri (dono)
-- **Substitui:** ADR-0005 decisão 4 (moderação apertada) e a parte do ADR-0002/ADR-0004 que
+- **Substitui:** ADR-0005 decisões 2, 3 e 4 (WhatsApp, CREF e moderação apertada) e a parte do ADR-0002/ADR-0004 que
   fazia da revisão humana um controle obrigatório.
-- **Continua valendo:** ADR-0005 decisões 1, 2 e 3 · ADR-0001 · ADR-0003 · o resto do ADR-0004.
+- **Continua valendo:** ADR-0005 decisão 1 · ADR-0001 · ADR-0003 · o resto do ADR-0004.
+
+> **Atualização de 25/08/2026:** este ADR mantém a política atual — zero dado pessoal
+> intencional e publicação sem fila —, mas o [ADR-0007](0007-feed-privado-e-atualizacao-automatica.md)
+> substituiu o CSV/aba `PUBLICAR` por feed privado autenticado, adicionou disparo na edição de
+> `remover`, cache para links curtos e atualização periódica do snapshot no navegador. As menções
+> abaixo a CSV público, cache do CSV e ciclo de ~10 minutos descrevem a implementação anterior.
+> Aqui, “fim da coleta” significa que o Form não **pede** dado pessoal. Campos livres ainda podem
+> ser usados contra a instrução: o gate detecta telefone, e-mail, CPF/CNPJ e links, mas não infere
+> nomes pessoais ou residências. Esses casos exigem `remover`; ver ADR-0007.
 
 ## Contexto
 
@@ -20,10 +29,10 @@ O dono pediu, em 25/08/2026, três mudanças de uma vez:
 O pedido 2 já tinha sido levantado antes e ficado em aberto (ADR-0005 decisão 4 escolheu o
 oposto: moderação apertada). Desta vez ele foi reafirmado, com prazo de publicação no mesmo dia.
 
-O ponto que faz este ADR ser aceitável, e não uma simples remoção de controle: **o pedido 3 muda
-o que está em jogo**. A revisão humana existia para impedir que dado pessoal vazasse. Se dado
-pessoal deixa de ser coletado, o controle não é removido — é substituído por um mais forte, que
-não depende de ninguém ser cuidadoso.
+O ponto que motivou este ADR: **o pedido 3 muda o caminho normal**. O formulário deixa de pedir
+dado pessoal, eliminando a coleta intencional de nome, telefone, e-mail e CREF. Isso não classifica
+todo texto livre: a correção posterior do ADR-0007 mantém a planilha privada e declara o limite
+para nomes pessoais e residências.
 
 ## Decisão 1 — O formulário deixa de coletar dado pessoal
 
@@ -33,18 +42,19 @@ identificar ninguém.
 
 Consequências que vão além da privacidade:
 
-- **A planilha deixa de ter coluna privada.** Isso derruba o vazamento nº 1 do desenho antigo —
-  publicar "Documento inteiro" por engano na tela do Google. Continua sendo erro, mas o pior caso
-  passa a ser expor carimbos de data/hora, não telefones.
+- **A planilha deixa de ter coluna desenhada para dado privado.** A conclusão inicial de que
+  “Publicar na web” passaria a ser seguro estava incompleta: alguém ainda pode digitar telefone
+  ou outro dado num campo livre. O ADR-0007 corrigiu isso mantendo a planilha inteira privada.
 - **Some a necessidade da segunda planilha.** O isolamento em dois arquivos existia só para
-  separar colunas privadas das públicas. Sem colunas privadas, a aba PUBLICAR da própria planilha
-  de respostas pode ser publicada, e o passo mais confuso do guia do dono desaparece.
+  separar colunas privadas das públicas. A projeção atual é feita pelo feed autenticado, sem aba
+  pública e sem outra planilha.
 - A trava de **coluna inesperada continua abortando** a ingestão: ela agora protege contra
   publicar a aba errada.
 
 ## Decisão 2 — Publicação automática, com quarentena por cadastro
 
-Não existe mais caixinha `aprovado`. Um cron a cada 10 minutos lê a planilha e publica. O que
+Não existe mais caixinha `aprovado`. Na implementação inicial, um cron a cada 10 minutos lia a
+planilha; o ADR-0007 acrescentou os gatilhos imediatos. O que
 sobrou de controle humano é o inverso: a coluna `remover`, que tira do ar.
 
 **A parte que não é óbvia é o tratamento de erro.** Com revisão humana, tudo era fail-closed: um

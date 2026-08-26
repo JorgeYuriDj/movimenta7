@@ -21,7 +21,7 @@ test("public field names are NOT rejected", () => {
   for (const k of [
     "grupo", "organizacao", "regiao", "modalidades", "dias", "horario",
     "local", "rede_social", "mapa", "custo", "publico",
-    "orientacao_profissional", "lat", "lon", "atualizado_em",
+    "orientacao_profissional", "lat", "lon", "posicao", "atualizado_em",
   ]) {
     assert.equal(isPrivateKey(k), false, `"${k}" e publico e nao pode ser barrado`);
   }
@@ -32,7 +32,7 @@ test("public field names are NOT rejected", () => {
 test("a allowlist cobre exatamente os campos que o site publica", () => {
   for (const k of [
     "grupo", "organizacao", "regiao", "modalidades", "dias", "horario", "local",
-    "custo", "publico", "orientacao_profissional", "rede_social", "mapa", "lat", "lon",
+    "custo", "publico", "orientacao_profissional", "rede_social", "mapa", "lat", "lon", "posicao",
   ]) {
     assert.equal(CAMPOS_PUBLICOS.has(k), true, `"${k}" precisa estar em CAMPOS_PUBLICOS`);
   }
@@ -51,31 +51,52 @@ test("phone-like values are caught in every free-text field", () => {
   assert.equal(looksLikePhone("local", "61 99999-0000"), true);
   assert.equal(looksLikePhone("local", "(61)99999-0000"), true);
   assert.equal(looksLikePhone("local", "+55 61 9 9999 0000"), true);
+  assert.equal(looksLikePhone("local", "61/99999/0000"), true);
   assert.equal(looksLikePhone("grupo", "Corrida - chame no 61 99999-0000"), true);
   assert.equal(looksLikePhone("local", "Parque da Cidade, portao 3"), false);
   assert.equal(looksLikePhone("horario", "06h30"), false);
 });
 
-/* The link fields are exempt from the digit checks, and the reason is not the
-   old "contato is special" — it is that they are never free text. The ingest
-   rewrites them to an allowlisted URL or drops them, so a phone cannot survive
-   in there, while digit soup that merely looks like one certainly can. */
+/* Maps coordinates need an exemption from the generic digit regex. Social
+   links still get a stricter profile-level check in linkRedeSocial(), so a
+   phone-shaped handle cannot use that exemption to become public. */
 test("os campos de link ficam fora das checagens de digitos, com rede de seguranca", () => {
   const mapaReal = "https://www.google.com/maps/place/Parque/@-15.7942287,-47.8821658,17z";
   assert.equal(looksLikePhone("mapa", mapaReal), false, "coordenada nao e telefone");
   assert.equal(looksLikeDocument("mapa", mapaReal), false);
   assert.equal(looksLikePhone("rede_social", "https://www.instagram.com/61999990000"), false,
-    "um @ pode ser so digitos e continua sendo um perfil publico");
+    "a regex generica nao deve confundir coordenadas; o normalizador faz a barreira social");
 
   // A rede: o que segura esses campos e a lista de destinos, nao o regex.
   assert.equal(linkNaoPermitido("mapa", mapaReal), false);
-  assert.equal(linkNaoPermitido("rede_social", "https://www.instagram.com/61999990000"), false);
+  assert.equal(linkNaoPermitido("rede_social", "https://www.instagram.com/61999990000"), true,
+    "perfil com identificador de telefone e recusado antes do snapshot");
   assert.equal(linkNaoPermitido("rede_social", "https://wa.me/5561999990000"), true,
     "WhatsApp saiu da lista: o numero E a URL");
   assert.equal(linkNaoPermitido("mapa", "https://drive.google.com/file/d/1"), true);
   assert.equal(linkNaoPermitido("rede_social", ""), false, "vazio nao reprova nada");
   assert.equal(linkNaoPermitido("local", "https://qualquer.example"), false,
     "so olha os dois campos de link");
+});
+
+test("a excecao de coordenadas nao vira excecao de PII dentro do link de mapa", () => {
+  const coordenadaPrecisa = "https://www.google.com/maps/@-15.79422870,-47.88216580,17z";
+  assert.equal(looksLikePhone("mapa", coordenadaPrecisa), false);
+  assert.equal(looksLikeDocument("mapa", coordenadaPrecisa), false);
+
+  assert.equal(looksLikePhone("mapa", "https://maps.google.com/?q=61%2099999-0000"), true);
+  assert.equal(looksLikeEmail("mapa", "https://maps.google.com/?q=joao%40exemplo.org"), true);
+  assert.equal(looksLikeDocument("mapa", "https://maps.google.com/?q=529.982.247-25"), true);
+  assert.equal(looksLikeDocument("mapa", "https://maps.google.com/?q=052998224725"), true,
+    "um digito extra nao pode esconder um CPF valido");
+  assert.equal(looksLikeDocument("mapa", "https://maps.google.com/?q=11.222.333%2F0001-81"), true);
+});
+
+test("o gate exige a forma canonica que a ingestao grava", () => {
+  assert.equal(linkNaoPermitido("mapa", "https://maps.app.goo.gl/abc?g_st=ic"), true);
+  assert.equal(linkNaoPermitido("mapa", "https://maps.app.goo.gl/abc"), false);
+  assert.equal(linkNaoPermitido("rede_social", "http://instagram.com/grupo?utm_source=x"), true);
+  assert.equal(linkNaoPermitido("rede_social", "https://instagram.com/grupo"), false);
 });
 
 test("value checks catch e-mail, valid CPF/CNPJ and stray links", () => {

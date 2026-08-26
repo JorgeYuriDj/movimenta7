@@ -12,7 +12,14 @@
 // The host allowlist lives in js/util.js so the browser and the build enforce
 // the SAME rule from the same lines — the drift that this file's own history
 // warns about (two copies of the public-field list) is not worth repeating.
-import { linkMapa, linkRedeSocial } from "../js/util.js";
+import {
+  dadosPessoaisEmUrlMapa, EMAIL_LIKE, linkMapa, linkRedeSocial, PHONE_LIKE,
+  textoTemDocumento,
+} from "../js/util.js";
+
+// Kept as public exports for callers/tests that use the privacy primitives from
+// this policy module; their implementation is shared with the URL normalizer.
+export { EMAIL_LIKE, PHONE_LIKE };
 
 /**
  * ALLOWLIST — the primary control (Camada 5 do veredito de 24/08/2026).
@@ -29,7 +36,7 @@ import { linkMapa, linkRedeSocial } from "../js/util.js";
 export const CAMPOS_PUBLICOS = new Set([
   "grupo", "organizacao", "regiao", "modalidades", "dias",
   "horario", "local", "rede_social", "mapa", "orientacao_profissional",
-  "custo", "publico", "lat", "lon",
+  "custo", "publico", "lat", "lon", "posicao",
 ]);
 
 /**
@@ -49,9 +56,6 @@ const FORBIDDEN_TOKENS = new Set([
   "email", "emails", "mail", "cpf", "rg", "nascimento",
   "responsavel", "pessoal", "pessoais", "endereco",
 ]);
-
-// "61 99999-0000" · "(61)99999-0000" · "+55 61 9 9999 0000" …
-export const PHONE_LIKE = /(\+?55[\s.-]?)?\(?\d{2}\)?[\s.-]?9?\s?\d{4}[\s.-]?\d{4}/;
 
 /** Splits a field name into lowercase, accent-free words (snake_case and camelCase). */
 export function keyTokens(key) {
@@ -77,16 +81,14 @@ export function isPrivateKey(key) {
  * number is the URL. A personal phone is private data wherever it is written
  * (ADR-0004), so the field it sits in does not buy it an exemption.
  *
- * The one exemption that IS sound is the pair of link fields, and it rests on a
- * different guarantee than the old one did: their value is never free text.
- * The ingest rewrites them to a URL on an allowlisted host or drops them, and
- * linkNaoPermitido() below fails the build if anything else ever appears there.
- * A phone number cannot survive that, while digit soup that merely LOOKS like
- * one can — a Google Maps URL is full of coordinates and place ids, and an
- * Instagram handle may legitimately be digits.
+ * Link fields need format-aware checks rather than a blanket exemption. A Maps
+ * coordinate is valid digit soup, but a phone hidden in q=/path/hash is still
+ * private; dadosPessoaisEmUrlMapa distinguishes those cases. Social identifiers
+ * are checked and canonicalized by linkRedeSocial before reaching this gate.
  */
 export function looksLikePhone(key, value) {
-  if (CAMPOS_DE_LINK.has(key)) return false;
+  if (key === "mapa") return dadosPessoaisEmUrlMapa(value).telefone;
+  if (key === "rede_social") return false;
   return typeof value === "string" && PHONE_LIKE.test(value);
 }
 
@@ -96,12 +98,12 @@ export function looksLikePhone(key, value) {
 // into "local" was published verbatim. These run in microseconds and carry no
 // list to maintain.
 
-export const EMAIL_LIKE = /[\w.+-]+@[\w-]+\.[a-z]{2,}/i;
 const URL_LIKE = /\b(https?:\/\/|www\.)\S+/i;
 
 /** True when a value contains an e-mail address. */
 export function looksLikeEmail(key, value) {
-  if (CAMPOS_DE_LINK.has(key)) return false; // see looksLikePhone
+  if (key === "mapa") return dadosPessoaisEmUrlMapa(value).email;
+  if (key === "rede_social") return false; // normalized by linkRedeSocial
   return typeof value === "string" && EMAIL_LIKE.test(value);
 }
 
@@ -130,33 +132,10 @@ export function linkNaoPermitido(key, value) {
   if (!CAMPOS_DE_LINK.has(key)) return false;
   const v = String(value ?? "").trim();
   if (!v) return false;
-  return key === "rede_social" ? !linkRedeSocial(v).url : !linkMapa(v);
-}
-
-/** Mod-11 check digits for CPF (11 digits). */
-function isCPF(d) {
-  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
-  const dv = (len) => {
-    let soma = 0;
-    for (let i = 0; i < len; i++) soma += Number(d[i]) * (len + 1 - i);
-    const r = (soma * 10) % 11;
-    return r === 10 ? 0 : r;
-  };
-  return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
-}
-
-/** Mod-11 check digits for CNPJ (14 digits). */
-function isCNPJ(d) {
-  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
-  const dv = (len) => {
-    const pesos = len === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
-    let soma = 0;
-    for (let i = 0; i < len; i++) soma += Number(d[i]) * pesos[i];
-    const r = soma % 11;
-    return r < 2 ? 0 : 11 - r;
-  };
-  return dv(12) === Number(d[12]) && dv(13) === Number(d[13]);
+  const normalizado = key === "rede_social" ? linkRedeSocial(v).url : linkMapa(v);
+  // The publisher must receive the canonical form the ingest would store. This
+  // catches a hand-edited snapshot that still carries a stripped query/hash.
+  return !normalizado || normalizado !== v;
 }
 
 /**
@@ -166,14 +145,9 @@ function isCNPJ(d) {
  * mod-11 about 1% of the time, so a hit here is almost never a coincidence.
  */
 export function looksLikeDocument(key, value) {
-  if (CAMPOS_DE_LINK.has(key)) return false; // see looksLikePhone
-  if (typeof value !== "string") return false;
-  for (const m of String(value).matchAll(/\d[\d.\-/]{9,17}\d/g)) {
-    const d = m[0].replace(/\D/g, "");
-    for (let i = 0; i + 11 <= d.length; i++) if (isCPF(d.slice(i, i + 11))) return true;
-    for (let i = 0; i + 14 <= d.length; i++) if (isCNPJ(d.slice(i, i + 14))) return true;
-  }
-  return false;
+  if (key === "mapa") return dadosPessoaisEmUrlMapa(value).documento;
+  if (key === "rede_social") return false; // normalized by linkRedeSocial
+  return textoTemDocumento(value);
 }
 
 /**

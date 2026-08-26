@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  safeUrl, cleanField, parseSnapshot, descreveIdade,
+  safeUrl, cleanField, parseSnapshot, descreveIdade, snapshotAtrasado,
   linkRedeSocial, linkMapa, MAX_FIELD, MAX_RECORDS,
   pinModalidade, PINS_CONHECIDOS, PIN_PADRAO,
 } from "../js/util.js";
@@ -68,6 +68,30 @@ test("linkRedeSocial accepts allowlisted networks and derives a readable label",
   assert.equal(linkRedeSocial("https://www.strava.com/clubs/123").url, "https://www.strava.com/clubs/123");
 });
 
+test("linkRedeSocial never turns a phone or e-mail into a public profile", () => {
+  for (const value of [
+    "61999990000",
+    "@61999990000",
+    "https://instagram.com/61999990000",
+    "https://instagram.com/nome%40pessoal.com",
+    "https://user:secret@instagram.com/igreja",
+  ]) {
+    assert.equal(linkRedeSocial(value).url, "", value);
+  }
+});
+
+test("linkRedeSocial canonicalizes a profile and drops trackers or hidden query data", () => {
+  assert.deepEqual(
+    linkRedeSocial("http://instagram.com/iasd.central?utm_source=x#bio"),
+    { url: "https://instagram.com/iasd.central", rotulo: "@iasd.central" },
+  );
+  assert.equal(
+    linkRedeSocial("https://instagram.com/iasd.central?telefone=61999990000#pessoal@x.com").url,
+    "https://instagram.com/iasd.central",
+  );
+  assert.equal(linkRedeSocial("https://facebook.com/profile.php?id=123").url, "");
+});
+
 test("linkRedeSocial refuses everything outside the allowlist", () => {
   assert.equal(linkRedeSocial("https://malware.example/x").url, "");
   assert.equal(linkRedeSocial("javascript:alert(1)").url, "");
@@ -87,6 +111,53 @@ test("linkMapa accepts the format the Google Maps share button produces", () => 
   assert.equal(linkMapa("https://www.openstreetmap.org/#map=15"), "https://www.openstreetmap.org/#map=15");
 });
 
+test("linkMapa preserves real coordinates and opaque place identifiers", () => {
+  assert.equal(
+    linkMapa("https://www.google.com/maps/place/Parque/@-15.79422870,-47.88216580,17z?entry=ttu"),
+    "https://www.google.com/maps/place/Parque/@-15.79422870,-47.88216580,17z",
+    "oito casas decimais nao podem parecer telefone",
+  );
+  assert.equal(
+    linkMapa("https://www.google.com/maps/search/?api=1&query=Parque&query_place_id=ChIJabc_123-XYZ"),
+    "https://www.google.com/maps/search/?api=1&query=Parque&query_place_id=ChIJabc_123-XYZ",
+  );
+  assert.equal(
+    linkMapa("https://maps.google.com/?cid=1234567890123456789"),
+    "https://maps.google.com/?cid=1234567890123456789",
+  );
+  assert.equal(
+    linkMapa("https://www.openstreetmap.org/?mlat=-15.79422870&mlon=-47.88216580#map=17/-15.79422870/-47.88216580"),
+    "https://www.openstreetmap.org/?mlat=-15.79422870&mlon=-47.88216580#map=17/-15.79422870/-47.88216580",
+  );
+});
+
+test("linkMapa removes dispensable query/hash data and upgrades known hosts", () => {
+  assert.equal(
+    linkMapa("http://maps.app.goo.gl/abc123?g_st=ic#joao%40exemplo.org"),
+    "https://maps.app.goo.gl/abc123",
+  );
+  assert.equal(
+    linkMapa("https://www.google.com/maps/place/Parque?entry=ttu&segredo=joao%40exemplo.org#61999990000"),
+    "https://www.google.com/maps/place/Parque",
+  );
+});
+
+test("linkMapa rejects personal data that is meaningful to the destination", () => {
+  for (const value of [
+    "https://joao%40exemplo.org:segredo@www.google.com/maps/place/X",
+    "https://www.google.com/maps/search/joao%40exemplo.org",
+    "https://maps.google.com/?q=61%2099999-0000",
+    "https://maps.google.com/?q=61%2C99999%2C0000",
+    "https://maps.google.com/?q=61%E2%80%8B99999-0000",
+    "https://maps.google.com/?q=%EF%BC%96%EF%BC%91%20%EF%BC%99%EF%BC%99%EF%BC%99%EF%BC%99%EF%BC%99-0000",
+    "https://maps.google.com/?q=joao%2540exemplo.org",
+    "https://maps.google.com/?query=529.982.247-25",
+    "https://maps.google.com/?query=052998224725",
+    "https://www.openstreetmap.org/search?query=11.222.333%2F0001-81",
+    "https://www.openstreetmap.org/#layers=joao%40exemplo.org",
+  ]) assert.equal(linkMapa(value), "", value);
+});
+
 test("linkMapa refuses Google pages that are not maps", () => {
   // google.com hosts the whole catalogue; without the /maps rule "a maps link"
   // would be a way to publish a Drive file or a search results page.
@@ -95,6 +166,8 @@ test("linkMapa refuses Google pages that are not maps", () => {
   assert.equal(linkMapa("https://drive.google.com/file/d/1"), "");
   assert.equal(linkMapa("https://goo.gl/xyz"), "");
   assert.equal(linkMapa("https://maps.app.goo.gl.exemplo-malicioso.com/a"), "");
+  assert.equal(linkMapa("https://sites.google.com/maps/viewer"), "");
+  assert.equal(linkMapa("https://www.google.com:443/maps/place/Parque"), "");
 });
 
 test("parseSnapshot exposes the two links and never the raw text", () => {
@@ -111,6 +184,13 @@ test("parseSnapshot exposes the two links and never the raw text", () => {
   assert.equal(b.mapaUrl, "");
 });
 
+test("parseSnapshot keeps only the two declared position precisions", () => {
+  const [exata] = parseSnapshot([{ grupo: "A", posicao: "exata" }]);
+  const [legado] = parseSnapshot([{ grupo: "B", posicao: "inventada" }]);
+  assert.equal(exata.posicao, "exata");
+  assert.equal(legado.posicao, "regiao");
+});
+
 test("descreveIdade says how stale the list is, in words a visitor can judge", () => {
   const agora = Date.parse("2026-08-25T12:00:00Z");
   const atras = (min) => new Date(agora - min * 60000).toISOString();
@@ -123,6 +203,16 @@ test("descreveIdade says how stale the list is, in words a visitor can judge", (
   assert.equal(descreveIdade("nao e data", agora), "");
   // Clock skew must not produce "há -2 minutos"; saying nothing is correct.
   assert.equal(descreveIdade(atras(-2), agora), "");
+});
+
+test("snapshotAtrasado only warns after the two-hour fallback window", () => {
+  const agora = Date.parse("2026-08-25T12:00:00Z");
+  const atras = (min) => new Date(agora - min * 60000).toISOString();
+  assert.equal(snapshotAtrasado(atras(119), agora), false);
+  assert.equal(snapshotAtrasado(atras(120), agora), false);
+  assert.equal(snapshotAtrasado(atras(121), agora), true);
+  assert.equal(snapshotAtrasado("", agora), false);
+  assert.equal(snapshotAtrasado(new Date(agora + 60_000).toISOString(), agora), false);
 });
 
 test("parseSnapshot caps the number of records (anti-flood)", () => {
@@ -142,6 +232,9 @@ test("cleanField strips invisible characters (Trojan Source, zero-width)", () =>
   assert.equal(cleanField("Cami‮nhada"), "Caminhada");
   assert.equal(cleanField("Cami​nhada"), "Caminhada");
   assert.equal(cleanField("﻿Grupo⁦ da Paz⁩"), "Grupo da Paz");
+  assert.equal(cleanField("61\u206099999-0000"), "6199999-0000", "word joiner nao separa telefone");
+  assert.equal(cleanField("61\u00AD99999-0000"), "6199999-0000", "soft hyphen nao separa telefone");
+  assert.equal(cleanField("Grupo\u0000 Seguro"), "Grupo Seguro", "controle C0 nao chega ao DOM");
   assert.equal(cleanField("Caminhada matinal"), "Caminhada matinal", "texto normal intacto");
 });
 

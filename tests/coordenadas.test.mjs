@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   coordenadaDeUrl, resolverCoordenada, regiaoDaCoordenada, dentroDoDF,
-  descartarCoordenadasRepetidas,
+  coordenadasCompartilhadas,
 } from "../scripts/coordenadas.mjs";
 
 const GEO = JSON.parse(readFileSync(new URL("../data/ra_df.geojson", import.meta.url), "utf8"));
@@ -85,6 +85,116 @@ test("a short link is followed until a URL names the position", () => {
   }).then((r) => assert.deepEqual(r, { lat: -15.79, lon: -47.88, fonte: "lugar" }));
 });
 
+test("real Google Maps URL shapes remain accepted by the network resolver", async () => {
+  let chamadas = 0;
+  const buscar = async () => { chamadas++; return semSalto; };
+  const casos = [
+    "https://www.google.com/maps/place/X/@-15.79,-47.88,17z",
+    "https://www.google.com.br/maps/place/X/data=!8m2!3d-15.79!4d-47.88",
+    "https://maps.google.com/?q=-15.79,-47.88",
+    "https://maps.google.com.br/?ll=-15.79%2C-47.88",
+  ];
+  for (const url of casos) {
+    assert.deepEqual(await resolverCoordenada(url, { buscar }),
+      { lat: -15.79, lon: -47.88, fonte: url.includes("!3d") ? "lugar" : url.includes("@") ? "camera" : "consulta" });
+  }
+  assert.equal(chamadas, 0, "um link completo do Google nao precisava consultar a rede");
+
+  const rotaRelativa = {
+    "https://maps.app.goo.gl/real": salto("https://www.google.com/maps/place/X"),
+    "https://www.google.com/maps/place/X": salto("/maps/place/X/@-15.79,-47.88,17z"),
+  };
+  const relativo = await resolverCoordenada("https://maps.app.goo.gl/real", {
+    buscar: async (url) => rotaRelativa[url] || semSalto,
+  });
+  assert.deepEqual(relativo, { lat: -15.79, lon: -47.88, fonte: "camera" });
+
+  const legado = await resolverCoordenada("https://goo.gl/maps/abc123", {
+    buscar: async () => salto("https://maps.google.com/?q=-15.79,-47.88"),
+  });
+  assert.deepEqual(legado, { lat: -15.79, lon: -47.88, fonte: "consulta" });
+});
+
+test("an untrusted initial URL is rejected before coordinate parsing or network access", async () => {
+  const recusados = [
+    "http://www.google.com/maps/@-15.79,-47.88,17z",
+    "file:///maps/@-15.79,-47.88,17z",
+    "https://evil.example/maps/@-15.79,-47.88,17z",
+    "https://www.google.com.evil.example/maps/@-15.79,-47.88,17z",
+    "https://192.0.2.1/maps/@-15.79,-47.88,17z",
+    "https://127.0.0.1/maps/@-15.79,-47.88,17z",
+    "https://[::1]/maps/@-15.79,-47.88,17z",
+    "https://localhost/maps/@-15.79,-47.88,17z",
+    "https://169.254.169.254/maps/@-15.79,-47.88,17z",
+    "https://usuario@www.google.com/maps/@-15.79,-47.88,17z",
+    "https://www.google.com:444/maps/@-15.79,-47.88,17z",
+    "https://www.google.com:443/maps/@-15.79,-47.88,17z",
+    "https://www.google.com/search?q=-15.79,-47.88",
+    "https://maps.google.com/not-maps/@-15.79,-47.88,17z",
+    "https://maps.app.goo.gl/codigo/extra",
+    "https://goo.gl/maps/codigo/extra",
+    "https://goo.gl/not-maps/@-15.79,-47.88,17z",
+  ];
+  let chamadas = 0;
+  for (const url of recusados) {
+    const r = await resolverCoordenada(url, {
+      buscar: async () => { chamadas++; return semSalto; },
+    });
+    assert.equal(r, null, url);
+  }
+  assert.equal(chamadas, 0, "consultou a rede antes de validar a URL inicial");
+});
+
+test("every redirect hop is rejected before parsing or fetching an unsafe destination", async () => {
+  const destinos = [
+    "http://www.google.com/maps/@-15.79,-47.88,17z",
+    "file:///maps/@-15.79,-47.88,17z",
+    "https://evil.example/maps/@-15.79,-47.88,17z",
+    "https://www.google.com.evil.example/maps/@-15.79,-47.88,17z",
+    "https://127.0.0.1/maps/@-15.79,-47.88,17z",
+    "https://localhost/maps/@-15.79,-47.88,17z",
+    "https://169.254.169.254/latest/meta-data/@-15.79,-47.88,17z",
+    "https://usuario@www.google.com/maps/@-15.79,-47.88,17z",
+    "https://www.google.com:444/maps/@-15.79,-47.88,17z",
+    "https://www.google.com/search?q=-15.79,-47.88",
+    "//www.google.com:443/maps/@-15.79,-47.88,17z",
+    "//169.254.169.254/maps/@-15.79,-47.88,17z",
+  ];
+
+  for (const destino of destinos) {
+    const chamadas = [];
+    const r = await resolverCoordenada("https://maps.app.goo.gl/seguro", {
+      buscar: async (url) => {
+        chamadas.push(url);
+        return salto(destino);
+      },
+    });
+    assert.equal(r, null, destino);
+    assert.deepEqual(chamadas, ["https://maps.app.goo.gl/seguro"],
+      `seguiu ou extraiu coordenada do destino recusado: ${destino}`);
+  }
+});
+
+test("an unsafe destination is rejected even after an allowed intermediate hop", async () => {
+  const chamadas = [];
+  const rota = {
+    "https://maps.app.goo.gl/inicio": salto("https://www.google.com/maps/place/sem-coordenada"),
+    "https://www.google.com/maps/place/sem-coordenada":
+      salto("https://169.254.169.254/latest/meta-data/@-15.79,-47.88,17z"),
+  };
+  const r = await resolverCoordenada("https://maps.app.goo.gl/inicio", {
+    buscar: async (url) => {
+      chamadas.push(url);
+      return rota[url] || semSalto;
+    },
+  });
+  assert.equal(r, null);
+  assert.deepEqual(chamadas, [
+    "https://maps.app.goo.gl/inicio",
+    "https://www.google.com/maps/place/sem-coordenada",
+  ], "o cliente tentou buscar o host de metadata no segundo redirect");
+});
+
 /**
  * THE BUG THAT WAS MEASURED, FROZEN SO IT CANNOT COME BACK.
  *
@@ -150,25 +260,25 @@ test("a point outside the DF is refused, even from just over the border", () => 
 
 // ---------- a defesa contra origens que respondem sempre a mesma coisa ----------
 
-test("groups that land on the identical point all lose it", () => {
+test("groups may share a real meeting point without losing its coordinate", () => {
   const registros = [
     { grupo: "A", lat: -15.8793728, lon: -48.1099776 },
     { grupo: "B", lat: -15.8793728, lon: -48.1099776 },
     { grupo: "C", lat: -15.7997, lon: -47.8645 },
     { grupo: "D" },
   ];
-  const { avisos } = descartarCoordenadasRepetidas(registros);
+  const { avisos } = coordenadasCompartilhadas(registros);
 
-  assert.equal(registros[0].lat, undefined, "A ficou com a posicao repetida");
-  assert.equal(registros[1].lat, undefined, "B ficou com a posicao repetida");
+  assert.equal(registros[0].lat, -15.8793728, "A perdeu o local real compartilhado");
+  assert.equal(registros[1].lat, -15.8793728, "B perdeu o local real compartilhado");
   assert.equal(registros[2].lat, -15.7997, "C tem posicao propria e nao podia ser tocada");
-  assert.equal(avisos.length, 2);
-  assert.match(avisos[0], /ponto fixo/);
+  assert.equal(avisos.length, 1);
+  assert.match(avisos[0], /2 grupos compartilham/);
 });
 
 test("a group with no coordinate at all is left alone", () => {
   const registros = [{ grupo: "A" }, { grupo: "B" }];
-  const { avisos } = descartarCoordenadasRepetidas(registros);
+  const { avisos } = coordenadasCompartilhadas(registros);
   assert.deepEqual(avisos, []);
 });
 
@@ -187,7 +297,8 @@ test("a registration whose link names its position arrives with that position", 
     "rede_social,mapa,orientacao_profissional,custo,publico,remover";
   const link = "https://www.google.com/maps/place/Quadra+502+Sul/data=!8m2!3d-15.8163!4d-47.8963";
   const csv = `${colunas}\n"502 fit","IASD","Samambaia","Funcional","Segunda","06h00",` +
-    `"Quadra 502 Sul","","${link}","Encontro social de prática livre","Gratuito","",""\n`;
+    `"Quadra 502 Sul","https://instagram.com/502fit","${link}",` +
+    `"Encontro social de prática livre","Gratuito","",""\n`;
 
   const [rec] = registrosPublicaveis(csv);
   assert.equal(rec.lat, -15.8163);
@@ -203,9 +314,67 @@ test("a registration with a search link keeps no position at all", async () => {
   const colunas = "grupo,organizacao,regiao,modalidades,dias,horario,local," +
     "rede_social,mapa,orientacao_profissional,custo,publico,remover";
   const csv = `${colunas}\n"502 fit","IASD","Samambaia","Funcional","Segunda","06h00",` +
-    `"Quadra 502 Sul","","https://www.google.com/maps?q=skate+park","Encontro","Gratuito","",""\n`;
+    `"Quadra 502 Sul","https://instagram.com/502fit",` +
+    `"https://www.google.com/maps?q=skate+park","Encontro","Gratuito","",""\n`;
 
   const [rec] = registrosPublicaveis(csv);
   assert.equal(rec.lat, undefined, "inventou uma posicao a partir de uma busca");
   assert.equal(rec.mapa, "https://www.google.com/maps?q=skate+park", "o link em si continua util");
+});
+
+test("a short Maps link is resolved once and reused from the private cache", async () => {
+  const { completarCoordenadas } = await import("../scripts/ingerir_csv.mjs");
+  const cache = { versao: 1, itens: {} };
+  let chamadas = 0;
+  const buscar = async () => {
+    chamadas++;
+    return salto("https://www.google.com/maps/place/X/data=!8m2!3d-15.79!4d-47.88");
+  };
+  const primeiro = [{ grupo: "A", mapa: "https://maps.app.goo.gl/xyz" }];
+  const r1 = await completarCoordenadas(primeiro, { cache, buscar, agora: () => "agora" });
+  assert.equal(r1.alterado, true);
+  assert.equal(primeiro[0].lat, -15.79);
+  assert.equal(chamadas, 1);
+
+  const segundo = [{ grupo: "B", mapa: "https://maps.app.goo.gl/xyz" }];
+  const r2 = await completarCoordenadas(segundo, { cache: r1.cache, buscar });
+  assert.equal(r2.alterado, false);
+  assert.equal(segundo[0].lon, -47.88);
+  assert.equal(chamadas, 1, "o mesmo link voltou a consultar o Google");
+});
+
+test("a transient short-link failure expires instead of making the pin approximate forever", async () => {
+  const { completarCoordenadas } = await import("../scripts/ingerir_csv.mjs");
+  const cache = { versao: 1, itens: {} };
+  let chamadas = 0;
+  const falha = async () => { chamadas++; return semSalto; };
+  const link = "https://maps.app.goo.gl/transitorio";
+
+  const r1 = await completarCoordenadas([{ grupo: "A", mapa: link }], {
+    cache,
+    buscar: falha,
+    agora: () => "2026-08-25T10:00:00.000Z",
+  });
+  assert.equal(chamadas, 1);
+
+  await completarCoordenadas([{ grupo: "B", mapa: link }], {
+    cache: r1.cache,
+    buscar: falha,
+    agora: () => "2026-08-25T12:00:00.000Z",
+  });
+  assert.equal(chamadas, 1, "o cooldown negativo nao evitou a repeticao imediata");
+
+  const recuperou = async () => {
+    chamadas++;
+    return salto("https://www.google.com/maps/place/X/@-15.79,-47.88,17z");
+  };
+  const registro = { grupo: "C", mapa: link };
+  await completarCoordenadas([registro], {
+    cache: r1.cache,
+    buscar: recuperou,
+    agora: () => "2026-08-25T17:00:01.000Z",
+  });
+  assert.equal(chamadas, 2);
+  assert.equal(registro.lat, -15.79);
+  assert.equal(registro.lon, -47.88);
 });

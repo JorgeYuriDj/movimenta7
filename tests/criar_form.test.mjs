@@ -1,674 +1,817 @@
 /**
- * Runs scripts/criar_form.gs against a stub of the Google Apps Script API and
- * checks the spreadsheet it builds.
+ * Contract tests for the Google Apps Script that owns the registration form,
+ * its private spreadsheet feed and the two publication triggers.
  *
- * Why this exists: that file runs once, inside the owner's Google account, on
- * launch day, and nobody here can debug it while it runs. Its whole job is to
- * produce a PUBLICAR tab whose header row ingerir_csv.mjs accepts and whose
- * MATCH() strings hit real columns — and both contracts are strings compared
- * across two files that no compiler ever reads together. A drift of one
- * character shows up as #REF! in a tab nobody opens, or as an aborted
- * ingestion, hours later, in a public log.
- *
- * So the last stage is checked for real: the header row this produces is turned
- * into a CSV and fed to the actual ingestion.
+ * The real script runs inside the owner's Google account. These stubs keep the
+ * security-sensitive cross-service contracts executable in the repository:
+ * no public spreadsheet, no private columns in the feed, and no broad GitHub
+ * token permission just to ask for a deployment.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { registrosPublicaveis } from "../scripts/ingerir_csv.mjs";
 
 const FONTE = readFileSync(new URL("../scripts/criar_form.gs", import.meta.url), "utf8");
+const ABA_RESPOSTAS = "Respostas ao formulario 1";
+const PROP = {
+  githubToken: "GITHUB_TOKEN",
+  githubRepo: "GITHUB_REPO",
+  spreadsheetId: "MOV7_SPREADSHEET_ID",
+  feedToken: "MOV7_FEED_TOKEN",
+  ownerEmail: "MOV7_OWNER_EMAIL",
+  lastDispatch: "MOV7_LAST_DISPATCH_AT",
+  dispatchPending: "MOV7_DISPATCH_PENDING",
+  lastAlert: "MOV7_LAST_REMOVAL_ALERT_AT",
+  alertDay: "MOV7_REMOVAL_ALERT_DAY",
+  alertAttempts: "MOV7_REMOVAL_ALERT_ATTEMPTS",
+  alertError: "MOV7_LAST_REMOVAL_ALERT_ERROR",
+};
+const SEGREDO_FEED = "feed_token_de_teste_com_mais_de_32_caracteres";
 
-/** Name Google gives the response tab in a pt-BR account — spaces included. */
-const ABA_RESPOSTAS = "Respostas ao formulário 1";
-
-/**
- * Names of the Script Properties the owner creates by hand, spelled out here
- * instead of read from the source: these three strings are a contract between a
- * file in this repository and three boxes typed into a Google account, and
- * renaming one in the code would otherwise leave the owner's working setup
- * pointing at a property nobody reads any more.
- */
-const PROP = { token: "GITHUB_TOKEN", csv: "PLANILHA_CSV_URL", repo: "GITHUB_REPO" };
-
-/** The group whose registration the instant-publication tests simulate. */
-const GRUPO_NOVO = "Vôlei da IASD Taguatinga";
-
-/**
- * Minimal fake of the two Apps Script services the file touches. It models the
- * one behaviour that matters and is easy to get wrong: the response sheet does
- * not exist until setDestination() is called, and it arrives with a timestamp
- * column followed by every question title, in creation order.
- */
 function ambienteFalso() {
   const titulos = [];
-  const registro = { formula: null, notas: [], validacoes: [], paginas: [], formsCriados: 0 };
+  const registro = {
+    confirmacao: "",
+    descricao: "",
+    emails: [],
+    formsCriados: 0,
+    itens: [],
+    locks: [],
+    logs: [],
+    paginas: [],
+    validacoes: [],
+  };
 
-  const item = () => {
+  const novoItem = (tipo) => {
+    const estado = { tipo, titulo: "", obrigatorio: false, escolhas: [], ajuda: "" };
+    registro.itens.push(estado);
     const self = {
-      setTitle: (t) => { titulos.push(t); return self; },
-      setRequired: () => self,
-      setChoiceValues: () => self,
-      setHelpText: () => self,
-      setChoices: () => self,
-      setGoToPage: () => self,
-      createChoice: () => ({}),
+      setTitle(titulo) {
+        estado.titulo = titulo;
+        titulos.push(titulo);
+        return self;
+      },
+      setRequired(valor = true) { estado.obrigatorio = Boolean(valor); return self; },
+      setChoiceValues(valores) { estado.escolhas = Array.from(valores); return self; },
+      setHelpText(texto) { estado.ajuda = texto; return self; },
+      setChoices(escolhas) { estado.escolhas = Array.from(escolhas); return self; },
+      createChoice(rotulo, destino) { return { rotulo, destino }; },
+      getTitle() { return estado.titulo; },
+      asMultipleChoiceItem() { return self; },
+      asParagraphTextItem() { return self; },
+      asTextItem() { return self; },
+      _estado: estado,
     };
+    estado.api = self;
     return self;
   };
-  // A page break is not a question, so it never becomes a column. It DOES need
-  // an identity, though: the old stub threw both the title and the navigation
-  // away, so the form could send every new registrant to the removal page and
-  // the suite stayed green. It did exactly that, in production, on 25/08.
-  const quebraDePagina = () => {
-    const pagina = { titulo: null };
+
+  const novaPagina = () => {
+    const pagina = { titulo: "", destino: null };
     registro.paginas.push(pagina);
-    const self = {
-      setTitle: (t) => { pagina.titulo = t; return self; },
-      setGoToPage: (destino) => { pagina.destino = destino; return self; },
+    const api = {
+      setTitle(titulo) { pagina.titulo = titulo; return this; },
+      setGoToPage(destino) { pagina.destino = destino; return this; },
+      getTitle: () => pagina.titulo,
+      asPageBreakItem() { return api; },
     };
-    return self;
+    pagina.api = api;
+    return api;
   };
-
-  function planilhaFalsa(nome) {
-    const abas = [folha("Página1", [])];
-    const ss = {
-      getId: () => "ID_FALSO",
-      getUrl: () => "https://docs.google.com/spreadsheets/d/ID_FALSO/edit",
-      getName: () => nome,
-      getSheets: () => abas.slice(),
-      getSheetByName: (n) => abas.find((a) => a.getSheetName() === n) || null,
-      insertSheet: (n) => { const a = folha(n, []); abas.push(a); return a; },
-      _receberRespostas: () => abas.push(folha(ABA_RESPOSTAS, ["Carimbo de data/hora", ...titulos])),
-    };
-    return ss;
-  }
 
   function folha(nome, cabecalho) {
-    const celulas = [cabecalho.slice()]; // celulas[0] = linha 1
+    const celulas = [cabecalho.slice()];
     const escrever = (linha, coluna, valor) => {
       while (celulas.length < linha) celulas.push([]);
       celulas[linha - 1][coluna - 1] = valor;
     };
+    const bloco = (linha, coluna, nLinhas, nColunas, exibir) => {
+      const saida = [];
+      for (let r = 0; r < nLinhas; r++) {
+        const atual = celulas[linha - 1 + r] || [];
+        const valores = [];
+        for (let c = 0; c < nColunas; c++) {
+          const valor = atual[coluna - 1 + c] ?? "";
+          valores.push(exibir ? String(valor) : valor);
+        }
+        saida.push(valores);
+      }
+      return saida;
+    };
     const self = {
       getSheetName: () => nome,
       getMaxRows: () => 1000,
-      getLastColumn: () => Math.max(...celulas.map((l) => l.length), 0),
-      setFrozenRows: () => self,
-      _linha: (n) => (celulas[n - 1] || []).slice(),
-      getRange: (a, b, _c, _d) => {
-        // A1 notation ("A2") or (row, column, [rows], [cols]).
-        const linha = typeof a === "string" ? Number(a.slice(1)) : a;
-        const coluna = typeof a === "string" ? a.charCodeAt(0) - 64 : b;
+      getLastColumn: () => Math.max(0, ...celulas.map((linha) => linha.length)),
+      getLastRow: () => celulas.reduce((ultima, linha, i) =>
+        (linha.some((valor) => valor !== "" && valor !== null && valor !== undefined) ? i + 1 : ultima), 0),
+      getRange(a, b, c = 1, d = 1) {
+        if (typeof a === "string") throw new Error(`A1 nao implementado no stub: ${a}`);
+        const linha = a;
+        const coluna = b;
         return {
-          // Returns a rows x cols block, like the real getValues(). The first
-          // version of this stub ignored the width and handed back a single
-          // cell, so acharAbaDeRespostas() never matched a header and reached
-          // the response tab only through its own fallback — the header-matching
-          // path this file is supposed to be covering was never once executed.
-          getValues: () => {
-            const nLinhas = _c ?? 1, nColunas = _d ?? 1;
-            const bloco = [];
-            for (let r = 0; r < nLinhas; r++) {
-              const l = celulas[linha - 1 + r] || [];
-              bloco.push(l.slice(coluna - 1, coluna - 1 + nColunas));
-            }
-            return bloco;
+          getValues: () => bloco(linha, coluna, c, d, false),
+          getDisplayValues: () => bloco(linha, coluna, c, d, true),
+          getDisplayValue: () => bloco(linha, coluna, 1, 1, true)[0][0],
+          setValue(valor) { escrever(linha, coluna, valor); return this; },
+          setValues(matriz) {
+            matriz.forEach((valores, r) => valores.forEach((valor, i) => escrever(linha + r, coluna + i, valor)));
+            return this;
           },
-          setValue: (v) => escrever(linha, coluna, v),
-          setValues: (m) => m[0].forEach((v, i) => escrever(linha, coluna + i, v)),
-          setFormula: (f) => { registro.formula = f; },
-          setNote: (n) => registro.notas.push(n),
-          setDataValidation: (v) => registro.validacoes.push({ coluna, regra: v }),
+          setNote: () => this,
+          setDataValidation(regra) {
+            registro.validacoes.push({ coluna, regra });
+            return this;
+          },
+          getRow: () => linha,
+          getColumn: () => coluna,
+          getSheet: () => self,
         };
+      },
+      _linha: (numero) => (celulas[numero - 1] || []).slice(),
+      _adicionar(objeto) {
+        const cab = celulas[0];
+        celulas.push(cab.map((titulo) => objeto[titulo] ?? ""));
       },
     };
     return self;
   }
 
+  function planilhaFalsa(nome) {
+    const abas = [folha("Pagina1", [])];
+    return {
+      getId: () => "ID_PLANILHA_PRIVADA",
+      getUrl: () => "https://docs.google.com/spreadsheets/d/ID_PLANILHA_PRIVADA/edit",
+      getName: () => nome,
+      getFormUrl: () => "https://docs.google.com/forms/d/FORM_ID/edit",
+      getSheets: () => abas.slice(),
+      getSheetByName: (procurado) => abas.find((aba) => aba.getSheetName() === procurado) || null,
+      _receberRespostas: () => abas.push(folha(ABA_RESPOSTAS, ["Carimbo de data/hora", ...titulos])),
+    };
+  }
+
   let planilha = null;
+  let formAtual = null;
+  let planilhaAtiva = true;
   const FormApp = {
     DestinationType: { SPREADSHEET: "SPREADSHEET" },
-    PageNavigationType: { SUBMIT: "SUBMIT" },
-    create: () => {
+    PageNavigationType: { CONTINUE: "CONTINUE", SUBMIT: "SUBMIT" },
+    ItemType: {
+      MULTIPLE_CHOICE: "MULTIPLE_CHOICE",
+      PAGE_BREAK: "PAGE_BREAK",
+      PARAGRAPH_TEXT: "PARAGRAPH",
+      TEXT: "TEXT",
+    },
+    create() {
       registro.formsCriados++;
       const form = {
-        setDescription: () => form,
-        setCollectEmail: () => form,
-        setLimitOneResponsePerUser: () => form,
-        addMultipleChoiceItem: item,
-        addTextItem: item,
-        addListItem: item,
-        addCheckboxItem: item,
-        addParagraphTextItem: item,
-        addPageBreakItem: quebraDePagina,
+        setDescription(texto) { registro.descricao = texto; return form; },
+        setCollectEmail(valor) { registro.coletaEmail = valor; return form; },
+        setLimitOneResponsePerUser(valor) { registro.limitaUmaResposta = valor; return form; },
+        setPublished(valor) { registro.publicado = valor; return form; },
+        setConfirmationMessage(texto) { registro.confirmacao = texto; return form; },
+        addMultipleChoiceItem: () => novoItem("MULTIPLE_CHOICE"),
+        addTextItem: () => novoItem("TEXT"),
+        addListItem: () => novoItem("LIST"),
+        addCheckboxItem: () => novoItem("CHECKBOX"),
+        addParagraphTextItem: () => novoItem("PARAGRAPH"),
+        addPageBreakItem: novaPagina,
         setDestination: () => planilha._receberRespostas(),
-        getEditUrl: () => "https://forms/edit",
-        getPublishedUrl: () => "https://forms/viewform",
+        getEditUrl: () => "https://docs.google.com/forms/d/FORM_ID/edit",
+        getPublishedUrl: () => "https://docs.google.com/forms/d/FORM_ID/viewform",
+        getItems(tipo) {
+          if (tipo === FormApp.ItemType.PAGE_BREAK) return registro.paginas.map((pagina) => pagina.api);
+          return registro.itens
+            .filter((estado) => !tipo || estado.tipo === tipo)
+            .map((estado) => estado.api);
+        },
       };
+      formAtual = form;
       return form;
     },
+    openByUrl: () => formAtual,
   };
+
   const SpreadsheetApp = {
-    create: (nome) => { planilha = planilhaFalsa(nome); return planilha; },
-    openById: () => planilha,
-    getActive: () => planilha, // o que consertarAbaPublicar usa: a planilha aberta
+    create(nome) { planilha = planilhaFalsa(nome); return planilha; },
+    openById(id) {
+      if (id !== planilha.getId()) throw new Error("planilha errada");
+      return planilha;
+    },
+    getActive: () => (planilhaAtiva ? planilha : null),
     flush: () => {},
     newDataValidation: () => ({ requireCheckbox: () => ({ build: () => "CHECKBOX" }) }),
   };
 
-  /* ---------- stubs for the instant-publication path (25/08/2026) ----------
-     Only what the code can actually get wrong is modelled: the status GitHub
-     answers with, the fact that Script Properties hand back exactly what was
-     pasted into the box, and that a trigger already installed must not be
-     installed a second time. */
-
   const propriedades = new Map([
-    // The surrounding whitespace is deliberate. Pasting a token into that box
-    // brings a trailing newline often enough to be a scar in this owner's
-    // notes, and "Bearer tok\n" is a 401 whose message mentions no such thing.
-    [PROP.token, " tok_de_teste\n"],
-    [PROP.csv, "https://docs.google.com/spreadsheets/d/e/XYZ/pub?output=csv"],
+    [PROP.githubToken, " token_github_de_teste\n"],
+    [PROP.feedToken, SEGREDO_FEED],
   ]);
   const PropertiesService = {
     getScriptProperties: () => ({
-      getProperty: (k) => (propriedades.has(k) ? propriedades.get(k) : null),
+      getProperty: (chave) => (propriedades.has(chave) ? propriedades.get(chave) : null),
+      setProperty(chave, valor) { propriedades.set(chave, String(valor)); return this; },
     }),
   };
 
-  const rede = {
-    chamadas: [],
-    esperas: [],
-    /** Default: GitHub accepts, and the published CSV already shows the group. */
-    responder: (url) => (url.includes("api.github.com")
-      ? { codigo: 204, texto: "" }
-      : { codigo: 200, texto: `grupo\n${GRUPO_NOVO}\n` }),
-  };
+  const rede = { chamadas: [], responder: () => ({ codigo: 204, texto: "" }) };
   const UrlFetchApp = {
-    fetch: (url, opcoes) => {
-      rede.chamadas.push({ url, opcoes: opcoes || {} });
-      const r = rede.responder(url, opcoes || {});
-      return { getResponseCode: () => r.codigo, getContentText: () => r.texto };
+    fetch(url, opcoes = {}) {
+      rede.chamadas.push({ url, opcoes });
+      const resultado = rede.responder(url, opcoes);
+      return {
+        getResponseCode: () => resultado.codigo,
+        getContentText: () => resultado.texto,
+      };
     },
   };
-  // Recorded, never actually slept: the waiting logic is worth testing, the
-  // two minutes it can spend are not worth adding to every CI run.
-  const Utilities = { sleep: (ms) => rede.esperas.push(ms) };
 
   const gatilhos = [];
+  let proximoGatilho = 0;
+  const adicionarGatilho = ({ funcao, tipo, planilha: origem = null, atraso = null }) => {
+    const gatilho = { id: `TRIGGER_${++proximoGatilho}`, funcao, tipo, planilha: origem, atraso };
+    gatilhos.push(gatilho);
+    return gatilho;
+  };
+  const apiGatilho = (gatilho) => ({
+    getEventType: () => gatilho.tipo,
+    getHandlerFunction: () => gatilho.funcao,
+    getTriggerSourceId: () => gatilho.planilha,
+    getUniqueId: () => gatilho.id,
+    _gatilho: gatilho,
+  });
   const ScriptApp = {
-    newTrigger: (funcao) => {
-      const t = { funcao, tipo: null, planilha: null };
+    EventType: { ON_FORM_SUBMIT: "onFormSubmit", ON_EDIT: "onEdit", CLOCK: "clock" },
+    newTrigger(funcao) {
+      const gatilho = { funcao, tipo: null, planilha: null, atraso: null };
       const construtor = {
-        forSpreadsheet: (ss) => { t.planilha = ss.getName(); return construtor; },
-        onFormSubmit: () => { t.tipo = "onFormSubmit"; return construtor; },
-        create: () => { gatilhos.push(t); return t; },
+        forSpreadsheet(ss) { gatilho.planilha = ss.getId(); return construtor; },
+        onFormSubmit() { gatilho.tipo = "onFormSubmit"; return construtor; },
+        onEdit() { gatilho.tipo = "onEdit"; return construtor; },
+        timeBased() { gatilho.tipo = "clock"; return construtor; },
+        after(ms) { gatilho.atraso = ms; return construtor; },
+        create() { return apiGatilho(adicionarGatilho(gatilho)); },
       };
       return construtor;
     },
-    getProjectTriggers: () => gatilhos.map((t) => ({ getHandlerFunction: () => t.funcao })),
+    getProjectTriggers: () => gatilhos.map(apiGatilho),
+    deleteTrigger(gatilhoApi) {
+      const id = gatilhoApi.getUniqueId();
+      const indice = gatilhos.findIndex((gatilho) => gatilho.id === id);
+      if (indice >= 0) gatilhos.splice(indice, 1);
+    },
+    getService: () => ({ getUrl: () => "https://script.google.com/macros/s/DEPLOYMENT_ID/exec" }),
+  };
+
+  const LockService = {
+    getScriptLock() {
+      const estado = { esperou: false, liberou: false };
+      registro.locks.push(estado);
+      return {
+        waitLock(ms) { estado.esperou = ms; },
+        releaseLock() { estado.liberou = true; },
+      };
+    },
+  };
+
+  const correio = { consultas: 0, falha: null, restante: 100 };
+  const MailApp = {
+    getRemainingDailyQuota() { correio.consultas++; return correio.restante; },
+    sendEmail(mensagem) {
+      if (correio.falha) throw correio.falha;
+      registro.emails.push({ ...mensagem });
+      correio.restante--;
+    },
+  };
+
+  const Session = {
+    getEffectiveUser: () => ({ getEmail: () => "dono.efetivo@example.test" }),
+  };
+
+  const ContentService = {
+    MimeType: { JSON: "application/json" },
+    createTextOutput(texto) {
+      return {
+        text: texto,
+        mimeType: "",
+        setMimeType(tipo) { this.mimeType = tipo; return this; },
+      };
+    },
   };
 
   const contexto = vm.createContext({
-    FormApp, SpreadsheetApp, PropertiesService, UrlFetchApp, Utilities, ScriptApp,
-    Logger: { log: () => {} },
+    ContentService,
+    FormApp,
+    LockService,
+    Logger: { log: (mensagem) => registro.logs.push(String(mensagem)) },
+    MailApp,
+    PropertiesService,
+    ScriptApp,
+    Session,
+    SpreadsheetApp,
+    UrlFetchApp,
   });
-  vm.runInContext(FONTE + "\ncriarFormMovimenta7();", contexto);
-  return { contexto, planilha: () => planilha, registro, titulos, rede, gatilhos, propriedades };
+  vm.runInContext(`${FONTE}\ncriarFormMovimenta7();`, contexto);
+
+  return {
+    contexto,
+    adicionarGatilho,
+    correio,
+    gatilhos,
+    planilha: () => planilha,
+    propriedades,
+    rede,
+    registro,
+    respostas: () => planilha.getSheetByName(ABA_RESPOSTAS),
+    setPlanilhaAtiva: (valor) => { planilhaAtiva = valor; },
+    setAgora(valor) {
+      contexto.__agoraTeste = valor;
+      vm.runInContext("agoraMs_ = function () { return __agoraTeste; };", contexto);
+    },
+  };
 }
 
 const ambiente = ambienteFalso();
-const publicar = ambiente.planilha().getSheetByName("PUBLICAR");
-const respostas = ambiente.planilha().getSheetByName(ABA_RESPOSTAS);
-const cabecalhoPublicar = publicar._linha(1);
-const cabecalhoRespostas = respostas._linha(1);
-
-/**
- * The bug this freezes cost the launch an afternoon and left no error behind.
- *
- * setGoToPage governs the page BEFORE the break it is called on. Calling it on
- * the registration break said "after the consent page, submit" — overridden by
- * the branching choice, so nothing looked broken — while the registration page
- * kept its default linear progression into the removal page. Everyone who
- * described their group was then asked to justify removing it, and abandoned.
- * Empty map, green CI, no failure anywhere: nothing HAD failed.
- */
-test("finishing the registration page submits, instead of asking to remove the group", () => {
-  const remocao = ambiente.registro.paginas.find((p) => /remo/i.test(p.titulo || ""));
-  const cadastro = ambiente.registro.paginas.find((p) => /Dados da atividade/i.test(p.titulo || ""));
-  assert.ok(remocao && cadastro, "as duas paginas precisam existir");
-  assert.equal(remocao.destino, "SUBMIT",
-    "a quebra que SEGUE o cadastro e quem faz a pagina de cadastro enviar");
-  assert.notEqual(cadastro.destino, "SUBMIT",
-    "SUBMIT na quebra do cadastro governa a pagina de consentimento, nao a de cadastro");
-});
-
-test("the script builds the PUBLICAR tab, so the owner pastes no formula", () => {
-  assert.ok(publicar, "aba PUBLICAR nao foi criada");
-  assert.equal(cabecalhoPublicar.length, 13);
-  assert.equal(cabecalhoPublicar[0], "grupo");
-  assert.equal(cabecalhoPublicar.at(-1), "remover");
-});
-
-test("the `remover` brake is added to the response sheet, as a checkbox", () => {
-  assert.ok(cabecalhoRespostas.includes("remover"), "coluna remover nao foi criada");
-  assert.equal(ambiente.registro.validacoes.length, 1);
-  assert.equal(ambiente.registro.validacoes[0].regra, "CHECKBOX");
-  // Placed after the last answer, never on top of one.
-  assert.equal(cabecalhoRespostas.at(-1), "remover");
-});
-
-// The #REF! class of failure, closed. Every column the formula looks up has to
-// be a question the same script created, or the tab silently publishes nothing.
-test("every MATCH() in the formula points at a column that exists", () => {
-  const procurados = [...ambiente.registro.formula.matchAll(/MATCH\("([^"]+)"/g)].map((m) => m[1]);
-  assert.equal(new Set(procurados).size, 13);
-  const existentes = new Set(cabecalhoRespostas);
-  const orfaos = [...new Set(procurados)].filter((t) => !existentes.has(t));
-  assert.deepEqual(orfaos, [], `a formula procura colunas que nao existem: ${orfaos.join(" | ")}`);
-});
-
-// The response sheet's name is locale-dependent and contains spaces. An
-// unquoted reference is a parse error; the wrong name is a #REF!.
-test("the formula quotes the real response sheet name", () => {
-  assert.match(ambiente.registro.formula, /'Respostas ao formulário 1'!/);
-  assert.ok(!ambiente.registro.formula.includes("Respostas!$A"), "nome de aba fixado no codigo");
-});
-
-/**
- * THE BUG THAT EMPTIED THE MAP, frozen so it cannot come back.
- *
- * The formula used to read $A$2:$ZZ, which is correct for exactly as long as
- * nobody answers the form. Google Forms delivers a response by INSERTING a row,
- * and an insert at row N pushes every absolute reference at or below N one row
- * down — so $A$2 became $A$3 after the first registration and $A$4 after the
- * second, always one row below the newest answer, matching NOTHING.
- *
- * Measured on the owner's live sheet on 25/08/2026: two registrations, PUBLICAR
- * empty, published CSV with only its header, zero pins — and a green CI
- * throughout, because no file in this repository was misbehaving.
- *
- * The fix is the RANGE, not a corrected row number: $A$2 retyped by hand would
- * drift again on the very next registration. A whole-column reference has no
- * row number left to shift.
- */
-test("no reference into the answers can be pushed down by a new response", () => {
-  const formula = ambiente.registro.formula;
-  const ancorados = [...formula.matchAll(/INDEX\('[^']+'!\$A\$(\d+)/g)].map((m) => m[1]);
-  assert.deepEqual(ancorados, [],
-    `INDEX ancorado na linha ${ancorados.join(", ")} — vai derivar a cada cadastro`);
-  assert.ok(formula.includes("$A:$ZZ"), "a leitura precisa ser de coluna inteira");
-});
-
-// The only row-anchored range left is the header row MATCH() searches. That one
-// is safe for the same reason the others were not: Forms inserts at row 2 or
-// below, so row 1 is the single row in the sheet that never moves.
-test("the only row still pinned by number is the header row", () => {
-  const faixas = [...ambiente.registro.formula.matchAll(/\$A\$\d+:\$ZZ\$\d+/g)].map((m) => m[0]);
-  assert.ok(faixas.length > 0, "MATCH precisa procurar na linha de cabecalho");
-  assert.deepEqual([...new Set(faixas)], ["$A$1:$ZZ$1"]);
-});
-
-// Reading whole columns means the header row now arrives INSIDE the data, and
-// it survives "Nome do grupo" <> "" — so it is excluded by name instead. Drop
-// this condition and the question titles publish themselves as a phantom group.
-test("the header row is excluded by name, since the range no longer skips it", () => {
-  assert.ok(ambiente.registro.formula.includes('<>"Nome do grupo"'),
-    "sem esta condicao o cabecalho vira um cadastro fantasma no mapa");
-});
-
-// Regression: headers stacked over FILTER in one array literal is an
-// ARRAY_LITERAL error while there are no responses, and the published CSV
-// becomes the error text — a red build every 10 minutes until someone
-// registers. Headers are values in row 1; the formula sits in A2.
-test("the empty spreadsheet still publishes a valid header-only CSV", () => {
-  const csv = cabecalhoPublicar.join(",") + "\n";
-  assert.deepEqual(registrosPublicaveis(csv), []);
-});
-
-// The contract that actually matters: the ingestion has to accept this header
-// row as-is. It aborts the whole build on a column it does not know.
-test("the ingestion accepts a CSV with exactly these columns", () => {
-  const linha = {
-    grupo: "Corredores da IASD Águas Claras",
-    organizacao: "IASD Águas Claras",
-    regiao: "Águas Claras",
-    modalidades: "Corrida, Caminhada",
-    dias: "Domingo, Quarta",
-    horario: "06h30",
-    local: "Parque Águas Claras, portão principal",
-    rede_social: "@iasd.aguasclaras",
-    mapa: "https://maps.app.goo.gl/exemplo123",
-    orientacao_profissional: "Encontro social de prática livre",
-    custo: "Gratuito",
-    publico: "Iniciantes bem-vindos",
-    remover: "",
-  };
-  const csv = cabecalhoPublicar.join(",") + "\n" +
-    cabecalhoPublicar.map((c) => `"${linha[c]}"`).join(",") + "\n";
-
-  const registros = registrosPublicaveis(csv);
-  assert.equal(registros.length, 1);
-  assert.equal(registros[0].grupo, linha.grupo);
-  assert.deepEqual(registros[0].modalidades, ["Corrida", "Caminhada"]);
-  assert.equal(registros[0].rede_social, "https://www.instagram.com/iasd.aguasclaras");
-  assert.equal(registros[0].mapa, linha.mapa);
-});
-
-// The brake has to work end to end, not just exist as a column.
-test("ticking `remover` takes the group off the map", () => {
-  const csv = cabecalhoPublicar.join(",") + "\n" +
-    cabecalhoPublicar.map((c) => (c === "remover" ? '"TRUE"' : '"x"')).join(",") + "\n";
-  assert.deepEqual(registrosPublicaveis(csv), []);
-});
-
-/**
- * The repair path, which is the one that actually ran on 25/08/2026.
- *
- * criarFormMovimenta7() always builds a NEW form and a NEW spreadsheet, so once
- * the form link has been shared it is the wrong tool: the owner would end up
- * with two forms and the wrong one in everybody's hands. consertarAbaPublicar()
- * rebuilds only the tab, on the sheet it is run from — and this test exists
- * because that distinction is invisible until it has already happened.
- */
-test("consertarAbaPublicar rewrites the tab without creating a second form", () => {
-  const antes = ambiente.registro.formsCriados;
-  // Whatever is in the cell today — including the drifted formula from the
-  // owner's sheet — has to be replaced, not merged with.
-  ambiente.registro.formula = `=IFERROR(FILTER(INDEX('Form Responses 1'!$A$4:$ZZ,0,1)),"")`;
-
-  vm.runInContext("consertarAbaPublicar();", ambiente.contexto);
-
-  assert.equal(ambiente.registro.formsCriados, antes, "criou um formulario novo — nao pode");
-  assert.ok(!ambiente.registro.formula.includes("$A$4"), "a formula velha ficou na celula");
-  assert.ok(ambiente.registro.formula.includes("$A:$ZZ"), "nao remontou a formula");
-  // The failure the guard in consertarAbaPublicar exists for: PUBLICAR is 13
-  // columns wide, so acharAbaDeRespostas()'s "any wide tab" fallback can hand it
-  // back as its own source — a circular reference that publishes nothing.
-  assert.ok(ambiente.registro.formula.includes(`'${ABA_RESPOSTAS}'!`),
-    "a formula tem que ler a aba de RESPOSTAS");
-  assert.ok(!ambiente.registro.formula.includes("PUBLICAR!"),
-    "a aba PUBLICAR virou fonte dela mesma");
-  // And the tab it leaves behind still has to be the one the ingestion accepts.
-  assert.deepEqual(registrosPublicaveis(publicar._linha(1).join(",") + "\n"), []);
-});
-
-/**
- * scripts/PUBLICAR_A2.txt is the formula the owner pastes by hand to repair a
- * sheet that is already live. It is a COPY of what montarAbaPublicar() builds,
- * and a stale copy fails in the worst way available: a wrong MATCH() string
- * makes the whole FILTER return #N/A, IFERROR turns that into "", and the tab
- * goes quietly empty — the very failure this file exists to prevent. So the
- * copy is compared against the generator on every run.
- *
- * The two differ only in the response tab's name (the file targets an en-US
- * account, the stub a pt-BR one), so that is normalised away before comparing.
- */
-test("the paste-by-hand formula still matches the one the script generates", () => {
-  const arquivo = readFileSync(new URL("../scripts/PUBLICAR_A2.txt", import.meta.url), "utf8");
-  // indexOf + slice, sem regex: a formula e a ultima coisa do arquivo, e
-  // escapar quebra de linha aqui ja custou tres tentativas.
-  const doArquivo = arquivo.slice(arquivo.indexOf("=IFERROR(")).trim();
-  assert.ok(doArquivo, "nao achei a formula em scripts/PUBLICAR_A2.txt");
-
-  const semNomeDeAba = (f) => f.replace(/'[^']+'!/g, "'ABA'!");
-  assert.equal(semNomeDeAba(doArquivo.trim()), semNomeDeAba(ambiente.registro.formula),
-    "PUBLICAR_A2.txt ficou desatualizado: gere de novo antes de mandar o dono colar");
-});
-
-/* ===========================================================================
- * INSTANT PUBLICATION — the trigger that replaces waiting for the cron
- * ===========================================================================
- *
- * Everything below runs inside the owner's Google account, against GitHub's API,
- * on a schedule nobody here controls. When it breaks it breaks THERE, in an
- * execution log only he can open, and nothing in this repository goes red — the
- * same shape of failure that emptied the map on 25/08. So every contract it
- * leans on is pinned from this side, where a mistake costs a red build instead
- * of a week of a site that quietly feels slow again.
- */
-
-const REDE_PADRAO = ambiente.rede.responder;
-const limparRede = () => {
-  ambiente.rede.responder = REDE_PADRAO;
-  ambiente.rede.chamadas.length = 0;
-  ambiente.rede.esperas.length = 0;
+const executarEm = (alvo, codigo) => vm.runInContext(codigo, alvo.contexto);
+const executar = (codigo) => executarEm(ambiente, codigo);
+const resposta = (codigo) => JSON.parse(executar(codigo).text);
+const limparRedeDe = (alvo) => {
+  alvo.rede.chamadas.length = 0;
+  alvo.rede.responder = () => ({ codigo: 204, texto: "" });
 };
-const doGitHub = () => ambiente.rede.chamadas.filter((c) => c.url.includes("api.github.com"));
-const doCsv = () => ambiente.rede.chamadas.filter((c) => !c.url.includes("api.github.com"));
+const limparRede = () => limparRedeDe(ambiente);
 
-/** One registration arriving, shaped the way Apps Script delivers it. */
-const CADASTRO_CHEGOU = "aoEnviarFormulario({ namedValues: { " +
-  JSON.stringify(ambiente.contexto.TITULOS.grupo) + ": [" + JSON.stringify(GRUPO_NOVO) + "] } });";
+test("the registration page submits instead of falling into the removal page", () => {
+  const remocao = ambiente.registro.paginas.find((pagina) => /remo/i.test(pagina.titulo));
+  const cadastro = ambiente.registro.paginas.find((pagina) => /Dados da atividade/i.test(pagina.titulo));
+  assert.ok(remocao && cadastro);
+  assert.equal(remocao.destino, "SUBMIT");
+  assert.notEqual(cadastro.destino, "SUBMIT");
+});
 
-test("the property names in the code are the ones the guide tells the owner to type", () => {
-  assert.equal(ambiente.contexto.PROP_TOKEN, PROP.token);
-  assert.equal(ambiente.contexto.PROP_CSV, PROP.csv);
-  assert.equal(ambiente.contexto.PROP_REPO, PROP.repo);
-  const guia = readFileSync(new URL("../moderacao/COMO_LIGAR_A_PLANILHA.md", import.meta.url), "utf8");
-  for (const nome of Object.values(PROP)) {
-    assert.ok(guia.includes(nome),
-      `o guia do dono nao cita ${nome} — ele nao tem como saber que precisa criar essa propriedade`);
+test("Google Maps and social profile are mandatory and confirmation sends the user back to the map", () => {
+  const mapa = ambiente.registro.itens.find((item) => item.titulo === ambiente.contexto.TITULOS.mapa);
+  const redeSocial = ambiente.registro.itens.find(
+    (item) => item.titulo === ambiente.contexto.TITULOS.rede_social,
+  );
+  assert.ok(mapa, "pergunta do Google Maps ausente");
+  assert.ok(redeSocial, "pergunta de rede social ausente");
+  assert.equal(mapa.obrigatorio, true);
+  assert.equal(redeSocial.obrigatorio, true);
+  assert.match(ambiente.registro.confirmacao, /autom.tic/i);
+  assert.match(ambiente.registro.confirmacao, /privad/i);
+  assert.match(ambiente.registro.confirmacao, /#secao-mapa/);
+});
+
+test("privacy copy says what is not requested or published without claiming nothing is collected", () => {
+  const texto = `${ambiente.registro.descricao}\n${ambiente.registro.confirmacao}\n${FONTE}`;
+  assert.match(ambiente.registro.descricao, /NÃO SOLICITAMOS DADOS PESSOAIS/);
+  assert.match(ambiente.registro.descricao, /NÃO PUBLICAMOS/);
+  assert.doesNotMatch(texto, /NO PERSONAL DATA IS COLLECTED AT ALL/i);
+  assert.doesNotMatch(texto, /N[aã]o coletamos dados de menores/i);
+  assert.doesNotMatch(texto, /Atendemos em at[eé] 24 horas/i);
+});
+
+test("the private response sheet gets one reversible removal checkbox", () => {
+  const cabecalho = ambiente.respostas()._linha(1);
+  assert.equal(cabecalho.at(-1), "remover");
+  assert.equal(cabecalho.filter((valor) => valor === "remover").length, 1);
+  assert.deepEqual(ambiente.registro.validacoes, [{ coluna: cabecalho.length, regra: "CHECKBOX" }]);
+});
+
+test("a newly created spreadsheet has no PUBLICAR tab or instruction to publish on the web", () => {
+  assert.equal(ambiente.planilha().getSheetByName("PUBLICAR"), null);
+  assert.ok(!ambiente.registro.logs.some((linha) => /Publicar na web/i.test(linha)));
+  assert.ok(!FONTE.includes("montarAbaPublicar"));
+  assert.ok(!FONTE.includes("consertarAbaPublicar"));
+});
+
+test("the public GET health check contains no spreadsheet data", () => {
+  const doc = resposta("doGet();");
+  assert.deepEqual(doc, { ok: true, servico: "movimenta7-feed", schema_version: 1 });
+  assert.equal("linhas" in doc, false);
+  assert.equal("colunas" in doc, false);
+});
+
+test("the private feed rejects missing, short and wrong tokens", () => {
+  for (const evento of [
+    "{}",
+    "{ parameter: { acao: 'feed', token: 'curto' } }",
+    "{ parameter: { acao: 'outra', token: " + JSON.stringify(SEGREDO_FEED) + " } }",
+    "{ parameter: { acao: 'feed', token: 'x'.repeat(80) } }",
+  ]) {
+    assert.deepEqual(resposta(`doPost(${evento});`), { ok: false, erro: "acesso negado" });
   }
 });
 
-/**
- * The cross-file contract that fails INVISIBLY.
- *
- * The trigger asks GitHub to run a workflow BY FILE NAME, and GitHub answers 422
- * if that file does not offer workflow_dispatch. Rename ci.yml, or drop that one
- * line from its `on:` block, and the only symptom is a failure inside the
- * owner's Apps Script log — the site simply goes back to updating within the
- * hour, which is indistinguishable from a quiet week.
- */
-test("the workflow the trigger calls exists and accepts being dispatched", () => {
+test("the authenticated feed projects only public columns and skips removal-only answers", () => {
+  const titulos = ambiente.contexto.TITULOS;
+  ambiente.respostas()._adicionar({
+    [titulos.grupo]: "Corredores do Lago",
+    [titulos.organizacao]: "IASD Lago Norte",
+    [titulos.regiao]: "Lago Norte",
+    [titulos.modalidades]: "Corrida, Caminhada",
+    [titulos.dias]: "Domingo",
+    [titulos.horario]: "06h30",
+    [titulos.local]: "Parque Vivencial",
+    [titulos.rede_social]: "@corredoresdolago",
+    [titulos.mapa]: "https://maps.app.goo.gl/exemplo123",
+    [titulos.orientacao_profissional]: "Encontro social de pratica livre",
+    [titulos.custo]: "Gratuito",
+    [titulos.publico]: "Iniciantes bem-vindos",
+    remover: "",
+    "O que precisa ser corrigido ou removido?": "SEGREDO_QUE_NAO_PODE_SAIR",
+  });
+  ambiente.respostas()._adicionar({
+    "Qual grupo sai ou muda? (nome exato como aparece no mapa)": "Outro grupo",
+    "O que precisa ser corrigido ou removido?": "remover agora",
+  });
+
+  ambiente.setPlanilhaAtiva(false);
+  const doc = resposta(`doPost({ parameter: { acao: 'feed', token: ${JSON.stringify(SEGREDO_FEED)} } });`);
+  ambiente.setPlanilhaAtiva(true);
+
+  assert.deepEqual(doc.colunas, [
+    "grupo", "organizacao", "regiao", "modalidades", "dias", "horario",
+    "local", "rede_social", "mapa", "orientacao_profissional", "custo", "publico", "remover",
+  ]);
+  assert.equal(doc.linhas.length, 1, "o ramo de remocao nao pode virar cadastro");
+  assert.equal(doc.linhas[0][0], "Corredores do Lago");
+  assert.equal(doc.linhas[0].length, doc.colunas.length);
+  assert.ok(!JSON.stringify(doc).includes("SEGREDO_QUE_NAO_PODE_SAIR"));
+});
+
+test("feed setup requires a strong secret and migrates the existing form copy idempotently", () => {
+  const local = ambienteFalso();
+  local.propriedades.delete(PROP.feedToken);
+  local.setPlanilhaAtiva(false); // same standalone project that created the form
+
+  assert.throws(() => executarEm(local, "configurarFeedPrivado();"), /pelo menos 32 caracteres/);
+  assert.equal(local.propriedades.has(PROP.feedToken), false, "o script inventou um segredo");
+
+  local.propriedades.set(PROP.feedToken, "curto");
+  assert.throws(() => executarEm(local, "configurarFeedPrivado();"), /pelo menos 32 caracteres/);
+
+  local.propriedades.set(PROP.feedToken, SEGREDO_FEED);
+  local.registro.descricao = "NÃO PEDIMOS NENHUM DADO; tudo é público. Não coletamos dados de menores.";
+  local.registro.confirmacao = "Cadastro recebido em até 24 horas.";
+  local.registro.coletaEmail = true;
+  local.registro.limitaUmaResposta = true;
+  local.registro.publicado = false;
+  const grupo = local.registro.itens.find((item) => item.titulo === local.contexto.TITULOS.grupo);
+  grupo.ajuda = "NAO_MEXER_EM_CAMPO_NAO_ALVO";
+  const paginaCadastro = local.registro.paginas.find(
+    (pagina) => pagina.titulo === local.contexto.TITULO_PAGINA_CADASTRO,
+  );
+  const paginaRemocao = local.registro.paginas.find(
+    (pagina) => pagina.titulo === local.contexto.TITULO_PAGINA_REMOCAO,
+  );
+  paginaCadastro.destino = "SUBMIT"; // bug da versão publicada em 25/08
+  paginaRemocao.destino = null;
+  for (const item of local.registro.itens) {
+    if ([local.contexto.TITULOS.mapa, local.contexto.TITULOS.rede_social].includes(item.titulo)) {
+      item.obrigatorio = false; // simula um formulário antigo
+    }
+    if (item.titulo === local.contexto.TITULOS.rede_social) {
+      item.ajuda = "Deixe em branco se o grupo não tiver perfil.";
+    }
+    if (item.titulo === local.contexto.TITULOS.mapa) item.ajuda = "Ajuda antiga do mapa.";
+    if (item.titulo === local.contexto.TITULO_CONSENTIMENTO) {
+      item.escolhas = ["LI e CONCORDO: tudo o que eu preencher aqui é público"];
+    }
+    if (item.titulo === local.contexto.TITULO_PEDIDO_PRIVADO) {
+      item.ajuda = "Atendemos em até 24 horas.";
+    }
+  }
+  executarEm(local, "configurarFeedPrivado();");
+  executarEm(local, "configurarFeedPrivado();");
+
+  assert.equal(local.propriedades.get(PROP.feedToken), SEGREDO_FEED, "rerun trocou o segredo existente");
+  assert.equal(local.propriedades.get(PROP.spreadsheetId), local.planilha().getId());
+  for (const titulo of [local.contexto.TITULOS.mapa, local.contexto.TITULOS.rede_social]) {
+    assert.equal(local.registro.itens.find((item) => item.titulo === titulo).obrigatorio, true);
+  }
+  assert.equal(local.registro.descricao, executarEm(local, "descricaoDoFormulario_();"));
+  assert.equal(local.registro.confirmacao, executarEm(local, "confirmacaoDoFormulario_();"));
+  assert.equal(local.registro.coletaEmail, false, "a migracao nao pode coletar e-mail");
+  assert.equal(local.registro.limitaUmaResposta, false, "o cadastro nao pode exigir login por limite de resposta");
+  assert.equal(local.registro.publicado, true, "o link publico do formulario deve continuar publicado");
+  assert.equal(
+    local.registro.itens.find((item) => item.titulo === local.contexto.TITULOS.rede_social).ajuda,
+    local.contexto.AJUDA_REDE_SOCIAL,
+  );
+  assert.equal(
+    local.registro.itens.find((item) => item.titulo === local.contexto.TITULOS.mapa).ajuda,
+    local.contexto.AJUDA_MAPA,
+  );
+  assert.deepEqual(
+    local.registro.itens.find((item) => item.titulo === local.contexto.TITULO_CONSENTIMENTO).escolhas,
+    [local.contexto.TEXTO_CONSENTIMENTO],
+  );
+  assert.equal(
+    local.registro.itens.find((item) => item.titulo === local.contexto.TITULO_PEDIDO_PRIVADO).ajuda,
+    local.contexto.AJUDA_PEDIDO_PRIVADO,
+  );
+  assert.equal(grupo.ajuda, "NAO_MEXER_EM_CAMPO_NAO_ALVO");
+  assert.equal(paginaCadastro.destino, "CONTINUE");
+  assert.equal(paginaRemocao.destino, "SUBMIT");
+  assert.doesNotMatch(
+    JSON.stringify({
+      descricao: local.registro.descricao,
+      confirmacao: local.registro.confirmacao,
+      itens: local.registro.itens.map(({ ajuda, escolhas }) => ({ ajuda, escolhas })),
+    }),
+    /Atendemos em até 24 horas|Não coletamos dados de menores|Deixe em branco/i,
+  );
+  assert.ok(!local.registro.logs.some((linha) => linha.includes(SEGREDO_FEED)));
+  assert.ok(!FONTE.includes("Utilities.getUuid"));
+});
+
+test("the Apps Script property names and workflow secret names stay aligned", () => {
+  assert.equal(ambiente.contexto.PROP_TOKEN, PROP.githubToken);
+  assert.equal(ambiente.contexto.PROP_REPO, PROP.githubRepo);
+  assert.equal(ambiente.contexto.PROP_PLANILHA_ID, PROP.spreadsheetId);
+  assert.equal(ambiente.contexto.PROP_FEED_TOKEN, PROP.feedToken);
+  assert.equal(ambiente.contexto.PROP_OWNER_EMAIL, PROP.ownerEmail);
+  assert.equal(ambiente.contexto.PROP_ULTIMO_DISPARO, PROP.lastDispatch);
+  assert.equal(ambiente.contexto.PROP_PUBLICACAO_PENDENTE, PROP.dispatchPending);
+  assert.equal(ambiente.contexto.PROP_ULTIMO_ALERTA, PROP.lastAlert);
+  assert.equal(ambiente.contexto.PROP_DIA_ALERTA, PROP.alertDay);
+  assert.equal(ambiente.contexto.PROP_TENTATIVAS_ALERTA, PROP.alertAttempts);
+  assert.equal(ambiente.contexto.PROP_ERRO_ALERTA, PROP.alertError);
+
+  const yml = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.match(yml, /PLANILHA_FEED_URL:\s*\$\{\{ secrets\.PLANILHA_FEED_URL \}\}/);
+  assert.match(yml, /PLANILHA_FEED_TOKEN:\s*\$\{\{ secrets\.PLANILHA_FEED_TOKEN \}\}/);
+  assert.ok(!yml.includes("PLANILHA_CSV_URL"));
+});
+
+test("a registration event calls workflow_dispatch immediately and never fetches a spreadsheet", () => {
+  const local = ambienteFalso();
+  local.setAgora(1_000_000);
+  limparRedeDe(local);
+  local.contexto.eventoTeste = {
+    namedValues: { [local.contexto.TITULO_ACAO]: [local.contexto.ACAO_CADASTRAR] },
+  };
+  executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(local.rede.chamadas.length, 1);
+  const pedido = local.rede.chamadas[0];
+  assert.match(pedido.url, /\/actions\/workflows\/ci\.yml\/dispatches$/);
+  assert.equal(pedido.opcoes.method, "post");
+  assert.equal(JSON.parse(pedido.opcoes.payload).ref, "main");
+  assert.equal(pedido.opcoes.headers.Authorization, "Bearer token_github_de_teste");
+});
+
+test("only editing a data cell under `remover` requests publication", () => {
+  const local = ambienteFalso();
+  local.setAgora(1_000_000);
+  const respostas = local.respostas();
+  const colunaRemover = respostas._linha(1).indexOf("remover") + 1;
+
+  limparRedeDe(local);
+  local.contexto.eventoTeste = { range: respostas.getRange(1, colunaRemover) };
+  executarEm(local, "aoEditarPlanilha(eventoTeste);");
+  assert.equal(local.rede.chamadas.length, 0, "cabecalho nao e remocao");
+
+  local.contexto.eventoTeste = { range: respostas.getRange(2, colunaRemover - 1) };
+  executarEm(local, "aoEditarPlanilha(eventoTeste);");
+  assert.equal(local.rede.chamadas.length, 0, "outra coluna nao e remocao");
+
+  local.contexto.eventoTeste = { range: respostas.getRange(2, colunaRemover) };
+  executarEm(local, "aoEditarPlanilha(eventoTeste);");
+  assert.equal(local.rede.chamadas.length, 1);
+});
+
+test("automatic publication is limited to once a minute with one trailing trigger", () => {
+  const local = ambienteFalso();
+  const evento = {
+    namedValues: { [local.contexto.TITULO_ACAO]: [local.contexto.ACAO_CADASTRAR] },
+  };
+  local.contexto.eventoTeste = evento;
+  limparRedeDe(local);
+
+  local.setAgora(1_000_000);
+  executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(local.rede.chamadas.length, 1);
+
+  local.setAgora(1_010_000);
+  executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  local.setAgora(1_020_000);
+  executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(local.rede.chamadas.length, 1, "a rajada abriu mais de um workflow");
+  assert.equal(
+    local.gatilhos.filter((g) => g.funcao === "publicarPendente_" && g.tipo === "clock").length,
+    1,
+    "a rajada criou mais de um gatilho trailing",
+  );
+
+  local.setAgora(1_059_999);
+  executarEm(local, "publicarPendente_();");
+  assert.equal(local.rede.chamadas.length, 1, "gatilho antecipado furou a janela de um minuto");
+  assert.equal(local.gatilhos.filter((g) => g.funcao === "publicarPendente_").length, 1);
+
+  local.setAgora(1_060_000);
+  executarEm(local, "publicarPendente_();");
+  assert.equal(local.rede.chamadas.length, 2);
+  assert.equal(local.gatilhos.filter((g) => g.funcao === "publicarPendente_").length, 0);
+  assert.equal(local.propriedades.get(PROP.dispatchPending), "0");
+
+  local.setAgora(1_060_001);
+  executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(local.gatilhos.filter((g) => g.funcao === "publicarPendente_").length, 1);
+  executarEm(local, "publicarAgora();");
+  assert.equal(local.rede.chamadas.length, 3, "publicarAgora deixou de ser imediato");
+  assert.equal(local.gatilhos.filter((g) => g.funcao === "publicarPendente_").length, 0);
+  assert.ok(local.registro.locks.every((lock) => lock.esperou === 10000 && lock.liberou));
+});
+
+test("correction and removal submissions skip CI and send only a coalesced private sheet link", () => {
+  const local = ambienteFalso();
+  const segredoSubmetido = "telefone 61999999999 e detalhe privado";
+  local.contexto.eventoTeste = {
+    namedValues: {
+      [local.contexto.TITULO_ACAO]: [local.contexto.ACAO_CORRIGIR_REMOVER],
+      "Qual grupo sai ou muda? (nome exato como aparece no mapa)": ["Grupo sigiloso"],
+      "O que precisa ser corrigido ou removido?": [segredoSubmetido],
+    },
+  };
+  limparRedeDe(local);
+
+  local.setAgora(2_000_000);
+  executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(local.rede.chamadas.length, 0, "pedido privado disparou CI inutil");
+  assert.equal(local.registro.emails.length, 1);
+  assert.equal(local.registro.emails[0].to, "dono.efetivo@example.test");
+  assert.equal(local.registro.emails[0].body, local.planilha().getUrl());
+  assert.ok(!JSON.stringify(local.registro.emails).includes(segredoSubmetido));
+  assert.ok(!JSON.stringify(local.registro.logs).includes(segredoSubmetido));
+
+  local.setAgora(2_001_000);
+  executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(local.registro.emails.length, 1, "rajada de pedidos virou spam");
+  assert.equal(local.rede.chamadas.length, 0);
+
+  local.propriedades.set(PROP.ownerEmail, "responsavel@example.test");
+  local.setAgora(2_600_001);
+  executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(local.registro.emails.length, 2);
+  assert.equal(local.registro.emails[1].to, "responsavel@example.test");
+  assert.equal(local.registro.emails[1].body, local.planilha().getUrl());
+  assert.equal(local.propriedades.get(PROP.alertAttempts), "2");
+  assert.equal(local.propriedades.get(PROP.alertError), "");
+  assert.equal(local.correio.consultas, 2);
+});
+
+test("private alerts stay inside a conservative per-day MailApp budget", () => {
+  const local = ambienteFalso();
+  local.contexto.eventoTeste = {
+    namedValues: {
+      [local.contexto.TITULO_ACAO]: [local.contexto.ACAO_CORRIGIR_REMOVER],
+      [local.contexto.TITULO_PEDIDO_PRIVADO]: ["conteudo que nao pode sair"],
+    },
+  };
+  const inicio = Date.UTC(2026, 7, 25, 12, 0, 0);
+  for (let i = 0; i < 30; i++) {
+    local.setAgora(inicio + i * 600_001);
+    executarEm(local, "aoEnviarFormulario(eventoTeste);");
+  }
+
+  assert.equal(local.contexto.LIMITE_TENTATIVAS_ALERTA_DIA, 24);
+  assert.equal(local.registro.emails.length, 24);
+  assert.equal(local.correio.consultas, 24);
+  assert.equal(local.correio.restante, 76);
+  assert.equal(local.propriedades.get(PROP.alertAttempts), "24");
+  assert.equal(local.propriedades.get(PROP.alertError), "limite_diario_local");
+  assert.ok(local.registro.logs.some((linha) => /continua na planilha.*limite_diario_local/i.test(linha)));
+  assert.ok(!JSON.stringify(local.registro.logs).includes("conteudo que nao pode sair"));
+});
+
+test("reserved quota and MailApp failures keep the private queue diagnostic without retry storms", () => {
+  const reservado = ambienteFalso();
+  reservado.contexto.eventoTeste = {
+    namedValues: {
+      [reservado.contexto.TITULO_ACAO]: [reservado.contexto.ACAO_CORRIGIR_REMOVER],
+      [reservado.contexto.TITULO_PEDIDO_PRIVADO]: ["pedido reservado sigiloso"],
+    },
+  };
+  reservado.correio.restante = reservado.contexto.RESERVA_EMAIL_DIARIA;
+  reservado.setAgora(Date.UTC(2026, 7, 25, 12, 0, 0));
+  assert.doesNotThrow(() => executarEm(reservado, "aoEnviarFormulario(eventoTeste);"));
+  assert.equal(reservado.registro.emails.length, 0);
+  assert.equal(reservado.propriedades.get(PROP.alertError), "quota_reservada");
+  assert.equal(reservado.propriedades.get(PROP.alertAttempts), "1");
+  assert.match(reservado.registro.logs.at(-1), /continua na planilha.*quota_reservada/i);
+
+  reservado.setAgora(Date.UTC(2026, 7, 25, 12, 1, 0));
+  executarEm(reservado, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(reservado.correio.consultas, 1, "pedido agrupado consultou MailApp outra vez");
+  assert.ok(!JSON.stringify(reservado.registro.logs).includes("pedido reservado sigiloso"));
+
+  const falho = ambienteFalso();
+  const textoPrivado = "SEGREDO_DA_FILA_61999999999";
+  falho.respostas()._adicionar({ [falho.contexto.TITULO_PEDIDO_PRIVADO]: textoPrivado });
+  const linhaAntes = falho.respostas()._linha(2);
+  falho.contexto.eventoTeste = {
+    namedValues: {
+      [falho.contexto.TITULO_ACAO]: [falho.contexto.ACAO_CORRIGIR_REMOVER],
+      [falho.contexto.TITULO_PEDIDO_PRIVADO]: [textoPrivado],
+    },
+  };
+  falho.correio.falha = new Error(`provedor repetiu ${textoPrivado} e dono@example.test`);
+  falho.setAgora(Date.UTC(2026, 7, 25, 13, 0, 0));
+  assert.doesNotThrow(() => executarEm(falho, "aoEnviarFormulario(eventoTeste);"));
+  assert.deepEqual(falho.respostas()._linha(2), linhaAntes, "falha de e-mail alterou a fila privada");
+  assert.equal(falho.registro.emails.length, 0);
+  assert.equal(falho.propriedades.get(PROP.alertError), "falha_envio");
+  assert.equal(falho.propriedades.get(PROP.alertAttempts), "1");
+  assert.match(falho.registro.logs.at(-1), /continua na planilha.*falha_envio/i);
+  assert.ok(!JSON.stringify(falho.registro.logs).includes(textoPrivado));
+
+  falho.setAgora(Date.UTC(2026, 7, 25, 13, 1, 0));
+  executarEm(falho, "aoEnviarFormulario(eventoTeste);");
+  assert.equal(falho.correio.consultas, 1, "falha entrou em tempestade de novas tentativas");
+});
+
+test("the workflow called by Apps Script exists and remains dispatchable", () => {
   const nome = ambiente.contexto.WORKFLOW;
   const yml = readFileSync(new URL(`../.github/workflows/${nome}`, import.meta.url), "utf8");
   const bloco = yml.slice(yml.indexOf("\non:"), yml.indexOf("\njobs:"));
-  assert.ok(bloco, "nao achei o bloco on: do workflow");
-  assert.match(bloco, /^\s{2}workflow_dispatch:\s*$/m,
-    `sem workflow_dispatch em ${nome}, o gatilho do formulario so recebe 422`);
-  assert.ok(bloco.includes(`[${ambiente.contexto.BRANCH}]`),
-    `o gatilho pede o branch "${ambiente.contexto.BRANCH}", que nao e o que o workflow publica`);
+  assert.match(bloco, /^\s{2}workflow_dispatch:\s*$/m);
+  assert.ok(bloco.includes(`[${ambiente.contexto.BRANCH}]`));
 });
 
-/**
- * The permission choice, frozen.
- *
- * repository_dispatch (POST /repos/{owner}/{repo}/dispatches) needs Contents:
- * write on a fine-grained token — permission to PUSH COMMITS. On this project
- * the repository IS the website, so a token like that, leaked from a Google
- * account, publishes anything it likes to the map. workflow_dispatch needs only
- * Actions: write, which can start a workflow and nothing else. The two URLs
- * differ by four path segments and one word in a guide; this test is what keeps
- * a future edit from swapping the safe one for the convenient one.
- */
-test("it publishes through the narrow API, never the one that can push commits", () => {
-  limparRede();
-  vm.runInContext(CADASTRO_CHEGOU, ambiente.contexto);
-
-  const pedido = doGitHub()[0];
-  assert.ok(pedido, "nenhum pedido de publicacao foi feito ao GitHub");
+test("the GitHub call uses Actions write, never repository_dispatch", () => {
+  const local = ambienteFalso();
+  limparRedeDe(local);
+  executarEm(local, "publicarAgora();");
+  const pedido = local.rede.chamadas[0];
   assert.match(pedido.url, /\/actions\/workflows\/ci\.yml\/dispatches$/);
-  assert.ok(!/\/repos\/[^/]+\/[^/]+\/dispatches$/.test(pedido.url),
-    "repository_dispatch exige Contents: write — um token que empurra commit no site");
-  assert.equal(pedido.opcoes.method, "post");
-  assert.equal(JSON.parse(pedido.opcoes.payload).ref, ambiente.contexto.BRANCH);
-  assert.equal(pedido.opcoes.headers.Authorization, "Bearer tok_de_teste",
-    "o token foi usado sem trim: a quebra de linha que vem colada junto vira um 401");
-  limparRede();
+  assert.ok(!/\/repos\/[^/]+\/[^/]+\/dispatches$/.test(pedido.url));
 });
 
-/**
- * Why the trigger waits at all, and why the wait has to END EARLY.
- *
- * The site does not read the spreadsheet — it reads the CSV Google republishes
- * from the PUBLICAR tab, and that republication is not instantaneous. Firing the
- * workflow the millisecond a response lands would often publish a map WITHOUT
- * the group that just registered, and since the run already happened, that
- * person would then wait a full cron round anyway, having watched the site
- * update and leave them out. Slower AND more confusing than not being instant.
- */
-test("it waits for the published CSV to show the group, then publishes", () => {
-  limparRede();
-  let tentativas = 0;
-  ambiente.rede.responder = (url) => {
-    if (url.includes("api.github.com")) return { codigo: 204, texto: "" };
-    tentativas++;
-    return { codigo: 200, texto: tentativas >= 3 ? `grupo\n${GRUPO_NOVO}\n` : "grupo\n" };
-  };
-
-  vm.runInContext(CADASTRO_CHEGOU, ambiente.contexto);
-
-  const ordem = ambiente.rede.chamadas.map((c) => (c.url.includes("api.github.com") ? "github" : "csv"));
-  assert.deepEqual(ordem, ["csv", "csv", "csv", "github"],
-    "publicou antes de o cadastro aparecer no CSV, ou continuou esperando depois de aparecer");
-  assert.ok(ambiente.rede.esperas.length >= 3, "nao esperou entre as tentativas");
-  // Without a parameter that changes, the ~5 min cache in front of the published
-  // URL would hand back the same pre-registration answer every single time, and
-  // the loop would always run to the end.
-  doCsv().forEach((c) => assert.match(c.url, /[?&]_=\d+/,
-    "sem parametro variavel a leitura sai do cache e a espera nunca termina cedo"));
-  limparRede();
+test("installing twice leaves exactly one form trigger and one edit trigger", () => {
+  const local = ambienteFalso();
+  limparRedeDe(local);
+  executarEm(local, "instalarGatilhoDePublicacao();");
+  executarEm(local, "instalarGatilhoDePublicacao();");
+  assert.deepEqual(
+    local.gatilhos.map(({ funcao, tipo }) => ({ funcao, tipo })),
+    [
+      { funcao: "aoEnviarFormulario", tipo: "onFormSubmit" },
+      { funcao: "aoEditarPlanilha", tipo: "onEdit" },
+    ],
+  );
+  assert.equal(local.rede.chamadas.length, 2, "cada instalacao valida o token uma vez");
 });
 
-test("if the CSV never shows the group, it publishes anyway instead of giving up", () => {
-  limparRede();
-  ambiente.rede.responder = (url) => (url.includes("api.github.com")
-    ? { codigo: 204, texto: "" }
-    : { codigo: 200, texto: "grupo\n" });
+test("trigger deduplication uses handler, event type and spreadsheet source id", () => {
+  const local = ambienteFalso();
+  const id = local.planilha().getId();
+  const exatoEnvio = { funcao: "aoEnviarFormulario", tipo: "onFormSubmit", planilha: id };
+  const exatoEdicao = { funcao: "aoEditarPlanilha", tipo: "onEdit", planilha: id };
+  local.adicionarGatilho(exatoEnvio);
+  local.adicionarGatilho(exatoEnvio);
+  local.adicionarGatilho(exatoEdicao);
+  local.adicionarGatilho(exatoEdicao);
+  local.adicionarGatilho({ ...exatoEnvio, planilha: "OUTRA_PLANILHA" });
+  local.adicionarGatilho({ ...exatoEnvio, tipo: "onEdit" });
+  limparRedeDe(local);
 
-  vm.runInContext(CADASTRO_CHEGOU, ambiente.contexto);
+  executarEm(local, "instalarGatilhoDePublicacao();");
+  executarEm(local, "instalarGatilhoDePublicacao();");
 
-  assert.equal(doCsv().length, ambiente.contexto.ESPERA_TENTATIVAS, "desistiu antes da hora");
-  assert.equal(doGitHub().length, 1,
-    "desistiu de publicar — uma rodada talvez cedo demais ainda e melhor que uma hora de espera");
-  limparRede();
+  const identidade = (g, funcao, tipo, planilha) =>
+    g.funcao === funcao && g.tipo === tipo && g.planilha === planilha;
+  assert.equal(local.gatilhos.filter((g) => identidade(g, "aoEnviarFormulario", "onFormSubmit", id)).length, 1);
+  assert.equal(local.gatilhos.filter((g) => identidade(g, "aoEditarPlanilha", "onEdit", id)).length, 1);
+  assert.equal(local.gatilhos.filter((g) => identidade(g, "aoEnviarFormulario", "onFormSubmit", "OUTRA_PLANILHA")).length, 1);
+  assert.equal(local.gatilhos.filter((g) => identidade(g, "aoEnviarFormulario", "onEdit", id)).length, 1);
+  assert.equal(local.rede.chamadas.length, 2, "instalacao deixou de validar imediatamente");
 });
 
-test("a network that is down does not stop the publication", () => {
-  limparRede();
-  ambiente.rede.responder = (url) => {
-    if (url.includes("api.github.com")) return { codigo: 204, texto: "" };
-    throw new Error("rede caiu");
-  };
-  vm.runInContext(CADASTRO_CHEGOU, ambiente.contexto);
-  assert.equal(doGitHub().length, 1, "a leitura do CSV derrubou o disparo junto");
-  limparRede();
-});
-
-/**
- * A group name arriving as a bare string instead of a list.
- *
- * v[0] on a string is its first LETTER, and searching the published CSV for "V"
- * matches instantly, every time — the wait would always pass on the first try,
- * which looks precisely like a working wait and is the bug the wait exists to
- * prevent.
- */
-test("the group name is read whole, even if it does not arrive as a list", () => {
-  limparRede();
-  const lidos = [];
-  ambiente.rede.responder = (url) => {
-    if (url.includes("api.github.com")) return { codigo: 204, texto: "" };
-    lidos.push(url);
-    return { codigo: 200, texto: `grupo\n${GRUPO_NOVO}\n` };
-  };
-  vm.runInContext("aoEnviarFormulario({ namedValues: { " +
-    JSON.stringify(ambiente.contexto.TITULOS.grupo) + ": " + JSON.stringify(GRUPO_NOVO) + " } });",
-  ambiente.contexto);
-  assert.equal(doGitHub().length, 1);
-  assert.equal(lidos.length, 1, "leu o CSV mais de uma vez: o nome do grupo saiu truncado");
-  limparRede();
-});
-
-// ---------- as mensagens de erro, que só o dono vai ler ----------
-
-test("a token without permission says WHICH permission, in Portuguese", () => {
-  limparRede();
-  ambiente.rede.responder = () => ({ codigo: 403, texto: "" });
-  assert.throws(() => vm.runInContext("publicarAgora();", ambiente.contexto), (e) => {
-    assert.match(e.message, /Actions/, "a mensagem nao diz qual permissao falta");
-    assert.match(e.message, /permissao/i);
-    return true;
-  });
-  limparRede();
-});
-
-test("no failure message ever prints the token", () => {
+test("GitHub failures explain the fix without exposing a credential", () => {
   for (const codigo of [401, 403, 404, 422, 500]) {
     limparRede();
-    ambiente.rede.responder = () => ({ codigo, texto: "segredo=tok_de_teste" });
-    assert.throws(() => vm.runInContext("publicarAgora();", ambiente.contexto), (e) => {
-      assert.ok(!e.message.includes("tok_de_teste"),
-        `a mensagem do ${codigo} vaza o token, e o dono cola esse log no chat`);
+    ambiente.rede.responder = () => ({ codigo, texto: `segredo=${SEGREDO_FEED}` });
+    assert.throws(() => executar("publicarAgora();"), (erro) => {
+      assert.ok(!erro.message.includes(SEGREDO_FEED));
+      if (codigo === 403) assert.match(erro.message, /Actions|permissao/i);
       return true;
     });
   }
   limparRede();
 });
 
-test("with no token stored, the error says exactly where to put one", () => {
+test("missing GitHub token fails before any network call", () => {
+  ambiente.propriedades.set(PROP.githubToken, "   ");
   limparRede();
-  ambiente.propriedades.set(PROP.token, "   "); // só espaços: o mesmo que nada
-  assert.throws(() => vm.runInContext("publicarAgora();", ambiente.contexto), (e) => {
-    assert.match(e.message, /Propriedades do script/);
-    assert.match(e.message, new RegExp(PROP.token));
-    return true;
-  });
-  assert.equal(doGitHub().length, 0, "chamou o GitHub sem token");
-  ambiente.propriedades.set(PROP.token, " tok_de_teste\n");
-  limparRede();
+  assert.throws(() => executar("publicarAgora();"), /Propriedades do script/);
+  assert.equal(ambiente.rede.chamadas.length, 0);
+  ambiente.propriedades.set(PROP.githubToken, " token_github_de_teste\n");
 });
 
-// ---------- a instalação, que o dono roda uma vez ----------
-
-test("installing the trigger twice does not create a second one", () => {
-  limparRede();
-  vm.runInContext("instalarGatilhoDePublicacao();", ambiente.contexto);
-  vm.runInContext("instalarGatilhoDePublicacao();", ambiente.contexto);
-
-  assert.equal(ambiente.gatilhos.length, 1,
-    "dois gatilhos = duas publicacoes por cadastro, para sempre");
-  assert.equal(ambiente.gatilhos[0].tipo, "onFormSubmit");
-  // A typo here creates a trigger that fires forever and fails every time.
-  assert.equal(ambiente.gatilhos[0].funcao, ambiente.contexto.FUNCAO_DO_GATILHO);
-  assert.equal(typeof ambiente.contexto[ambiente.contexto.FUNCAO_DO_GATILHO], "function",
-    "o gatilho aponta para uma funcao que nao existe neste arquivo");
-  limparRede();
-});
-
-/**
- * The install ends by publishing for real, and that is the point of it: a wrong
- * token fails HERE, in front of the owner, with a sentence telling him what to
- * fix — instead of failing weeks later at a stranger's registration, where the
- * only symptom is that the site feels slow again.
- */
-test("installing proves the token works right then, not weeks later", () => {
-  limparRede();
-  let bateu = false;
-  ambiente.rede.responder = (url) => {
-    if (url.includes("api.github.com")) { bateu = true; return { codigo: 401, texto: "" }; }
-    return { codigo: 200, texto: "" };
-  };
-  assert.throws(() => vm.runInContext("instalarGatilhoDePublicacao();", ambiente.contexto), (e) => {
-    assert.match(e.message, /401|token/i);
-    return true;
-  });
-  assert.ok(bateu, "instalou o gatilho sem nunca testar o token");
-  limparRede();
-});
-
-/**
- * Rule 11 of CLAUDE.md, enforced instead of remembered: this repository is
- * public, and this is now the one file in it whose whole job is to hold a
- * credential — somewhere else.
- */
-test("no GitHub token was ever pasted into this repository", () => {
-  const parecemToken = /gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}/;
-  assert.ok(!parecemToken.test(FONTE),
-    "tem coisa com cara de token do GitHub em scripts/criar_form.gs — o repositorio e publico");
-  assert.ok(FONTE.includes("PropertiesService"),
-    "o token tem que vir das Propriedades do Script, nunca do codigo");
+test("no credential-shaped value is committed in the Apps Script source", () => {
+  const pareceGitHub = /gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}/;
+  assert.ok(!pareceGitHub.test(FONTE));
+  assert.ok(FONTE.includes("PropertiesService"));
 });

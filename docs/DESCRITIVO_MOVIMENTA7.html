@@ -36,9 +36,13 @@
   <span class="tag">plano aprovado pelo dono · 23/08/2026</span>
   <div class="box priv" style="margin:14px 0">⚠️ <b>Este descritivo é de 23/08/2026 e parte dele
   está vencida.</b> Onde ele mostrar <b>moderação humana</b>, <b>APROVADO=SIM</b>, <b>botão de
-  WhatsApp</b> ou <b>planilha privada com nome e telefone</b>, quem manda é o <b>ADR-0006</b>
-  (25/08/2026): a publicação é automática e o formulário <b>não coleta nenhum dado pessoal</b>.
-  Fonte atual: <code>docs/adr/0006-publicacao-automatica-sem-dado-pessoal.md</code>.</div>
+  WhatsApp</b> ou <b>planilha privada com nome e telefone</b>, quem manda é o <b>ADR-0006</b>:
+  a publicação é automática e o formulário <b>não pede nenhum dado pessoal</b>. Onde aparecer
+  moderação, JSON vivo ou planilha publicada, quem manda é o <b>ADR-0007</b>: feed privado
+  autenticado, gates no GitHub e snapshot sanitizado. Os gates detectam telefone, e-mail,
+  CPF/CNPJ e links; não inferem nomes pessoais ou residências em texto livre. Fontes atuais:
+  <code>docs/adr/0006-publicacao-automatica-sem-dado-pessoal.md</code> e
+  <code>docs/adr/0007-feed-privado-e-atualizacao-automatica.md</code>.</div>
   <h1>movimenta7</h1>
   <p class="sub"><b>Encontre uma atividade física perto de você, participe no seu ritmo e
   movimente-se em comunidade.</b> Rede de atividades esportivas organizadas pela comunidade
@@ -140,7 +144,7 @@
     <tr><td>Site</td><td>Estático (HTML/CSS/JS puro) no GitHub Pages</td><td>Zero custo, zero build, lançamento em 1 dia — princípio KISS da base (ADR-0001)</td></tr>
     <tr><td>Mapa</td><td>Leaflet 1.9.4 + tiles CARTO grátis + contorno oficial das RAs (IPEDF)</td><td>Versão estável comprovada; sem chave de API; mapa preso ao DF (ADR-0003)</td></tr>
     <tr><td>Dados</td><td>Form → planilha privada → moderação → JSON público</td><td>Privacidade por construção, moderação = 1 coluna + 1 clique (ADR-0002)</td></tr>
-    <tr><td>Segurança</td><td>textContent sempre + limites + gate no CI com denylist</td><td>Vazamento de dado pessoal vira falha de build, não incidente (ADR-0004)</td></tr>
+    <tr><td>Segurança</td><td>textContent sempre + limites + gate no CI com denylist</td><td>Telefone, e-mail, CPF/CNPJ e links indevidos viram falha de build; nomes e residências exigem remoção (ADRs 0004/0007)</td></tr>
     <tr><td>Revisor externo</td><td>Codex (plano Pro do dono) em 3 marcos, read-only</td><td>Mesmo ciclo que funcionou no ifp-plataforma; prompt pronto em inglês</td></tr>
   </table></div>
 

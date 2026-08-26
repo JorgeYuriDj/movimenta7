@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCSV, registrosPublicaveis } from "../scripts/ingerir_csv.mjs";
+import { feedParaCSV, lerTextoLimitado, parseCSV, registrosPublicaveis } from "../scripts/ingerir_csv.mjs";
 
 const CAB = "grupo,organizacao,regiao,modalidades,dias,horario,local,rede_social,mapa," +
   "orientacao_profissional,custo,publico,remover";
@@ -25,6 +25,28 @@ test("parseCSV respeita virgula e quebra de linha dentro de aspas", () => {
 
 test("parseCSV entende aspas duplicadas como aspa literal", () => {
   assert.deepEqual(parseCSV('x,"diz ""oi"" aqui"'), [["x", 'diz "oi" aqui']]);
+});
+
+test("o feed privado tem contrato versionado e largura fixa", () => {
+  const csv = feedParaCSV({
+    ok: true,
+    schema_version: 1,
+    colunas: CAB.split(","),
+    linhas: [linha().split(",")],
+  });
+  assert.equal(registrosPublicaveis(csv).length, 1);
+  assert.throws(() => feedParaCSV({ ok: true, schema_version: 2 }), /schema_version=1/);
+  assert.throws(() => feedParaCSV({
+    ok: true, schema_version: 1, colunas: ["a", "b"], linhas: [["x"]],
+  }), /largura/);
+});
+
+test("o teto do feed conta bytes UTF-8 e interrompe antes de aceitar multibyte demais", async () => {
+  assert.equal(await lerTextoLimitado(new Response("á"), 2), "á");
+  await assert.rejects(() => lerTextoLimitado(new Response("áá"), 3), /limite de bytes/);
+  await assert.rejects(() => lerTextoLimitado(new Response("ok", {
+    headers: { "content-length": "99" },
+  }), 10), /limite de bytes/);
 });
 
 // ADR-0006: a caixinha "aprovado" deixou de existir. Este teste e o que trava a
@@ -71,7 +93,7 @@ test("NAO deixa forjar um cadastro pelo texto de um campo", () => {
 test("a ordem das colunas nao importa: resolve por NOME", () => {
   const cab = "remover,publico,custo,orientacao_profissional,mapa,rede_social," +
     "local,horario,dias,modalidades,regiao,organizacao,grupo";
-  const csv = [cab, "FALSE,Todos,Gratuito,livre,,@g,Parque,06h30,Segunda,Caminhada,Taguatinga,Igreja X,Grupo Y"].join("\n");
+  const csv = [cab, "FALSE,Todos,Gratuito,livre,https://maps.app.goo.gl/x,@g,Parque,06h30,Segunda,Caminhada,Taguatinga,Igreja X,Grupo Y"].join("\n");
   const r = registrosPublicaveis(csv)[0];
   assert.equal(r.grupo, "Grupo Y");
   assert.equal(r.regiao, "Taguatinga");
@@ -93,12 +115,32 @@ test("cadastro com dado pessoal e pulado, e o resto do mapa continua no ar", () 
   assert.deepEqual(r.map((x) => x.grupo), ["Grupo Bom", "Outro Bom"]);
 });
 
-test("link fora da lista custa o link, nunca o pin", () => {
+test("caracter invisivel ou digito full-width nao esconde telefone", () => {
+  const csv = [CAB,
+    linha({ grupo: "Com zero width", local: "Chame 61\u200B99999-0000" }),
+    linha({ grupo: "Com word joiner", local: "Chame 61\u206099999-0000" }),
+    linha({ grupo: "Com soft hyphen", local: "Chame 61\u00AD99999-0000" }),
+    linha({ grupo: "Com barra", local: "Chame 61/99999/0000" }),
+    linha({ grupo: "Com full width", local: "Chame ６１ ９９９９９-００００" }),
+    linha({ grupo: "Seguro" }),
+  ].join("\n");
+  assert.deepEqual(registrosPublicaveis(csv).map((r) => r.grupo), ["Seguro"]);
+});
+
+test("texto publico e normalizado e limitado antes de ser gravado", () => {
+  const [r] = registrosPublicaveis([CAB, linha({ grupo: "Ａ".repeat(200) })].join("\n"));
+  assert.equal(r.grupo, "A".repeat(120));
+});
+
+test("sem rede social ou rota validas o cadastro inteiro fica em quarentena", () => {
   const csv = [CAB, linha({ rede_social: "https://malware.example", mapa: "sei la" })].join("\n");
-  const r = registrosPublicaveis(csv);
-  assert.equal(r.length, 1, "o grupo continua no mapa");
-  assert.equal("rede_social" in r[0], false);
-  assert.equal("mapa" in r[0], false);
+  assert.deepEqual(registrosPublicaveis(csv), []);
+  assert.deepEqual(registrosPublicaveis([CAB, linha({ rede_social: "", mapa: "" })].join("\n")), []);
+});
+
+test("telefone disfarçado de perfil social nunca vira link publico", () => {
+  const csv = [CAB, linha({ rede_social: "@61999990000" }), linha({ grupo: "Seguro" })].join("\n");
+  assert.deepEqual(registrosPublicaveis(csv).map((r) => r.grupo), ["Seguro"]);
 });
 
 test("links aceitos sao gravados ja normalizados, nunca o texto cru", () => {
@@ -110,10 +152,48 @@ test("links aceitos sao gravados ja normalizados, nunca o texto cru", () => {
   assert.equal(r.mapa, "https://maps.app.goo.gl/xyz");
 });
 
+test("PII escondida em URL de mapa fica em quarentena sem aparecer no log", () => {
+  const hostis = [
+    "https://joao%40exemplo.org:segredo@www.google.com/maps/place/X",
+    "https://maps.google.com/?q=61%2099999-0000",
+    "https://maps.google.com/?q=529.982.247-25",
+    "https://www.openstreetmap.org/search?query=11.222.333%2F0001-81",
+  ];
+  const avisos = [];
+  const anterior = console.warn;
+  console.warn = (msg) => avisos.push(String(msg));
+  let registros;
+  try {
+    registros = registrosPublicaveis([
+      CAB,
+      ...hostis.map((mapa, i) => linha({ grupo: `Hostil ${i}`, mapa })),
+      linha({ grupo: "Seguro", mapa: "https://maps.app.goo.gl/abc?g_st=ic#tracker" }),
+    ].join("\n"));
+  } finally {
+    console.warn = anterior;
+  }
+  assert.deepEqual(registros.map((r) => r.grupo), ["Seguro"]);
+  assert.equal(registros[0].mapa, "https://maps.app.goo.gl/abc");
+  for (const bruto of hostis) assert.equal(avisos.some((msg) => msg.includes(bruto)), false);
+});
+
 test("regiao que o mapa nao conhece pula o cadastro em vez de reprovar o build", () => {
   const csv = [CAB, linha({ grupo: "Fora do mapa", regiao: "Rio de Janeiro" }), linha()].join("\n");
   const r = registrosPublicaveis(csv);
   assert.deepEqual(r.map((x) => x.grupo), ["Caminhada da Manha"]);
+});
+
+test("logs de descarte nunca repetem o valor hostil de uma celula", () => {
+  const segredo = "REGIAO-61-99999-0000";
+  const avisos = [];
+  const anterior = console.warn;
+  console.warn = (msg) => avisos.push(String(msg));
+  try {
+    registrosPublicaveis([CAB, linha({ regiao: segredo }), linha()].join("\n"));
+  } finally {
+    console.warn = anterior;
+  }
+  assert.equal(avisos.some((msg) => msg.includes(segredo)), false);
 });
 
 test("envio duplicado entra uma vez so", () => {

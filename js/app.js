@@ -7,9 +7,11 @@ const CFG = window.MOV7_CONFIG || {};
 const URLS = { form: safeUrl(CFG.FORM_URL), repo: safeUrl(CFG.REPO_URL) };
 const POLL_NORMAL = 60_000;
 const POLL_CADASTRO = 20_000;
+// Leaflet is vendored with its BSD-2-Clause license. Keeping the executable
+// dependency on our own origin avoids turning a CDN outage/block into a blank map.
 const LEAFLET = {
-  css: { id: "mov7-leaflet-css", href: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", integrity: "sha256-p4NxAoJBhIIN+hmNHrzRCF9tD/miZyoHS5obTRR9BMY=" },
-  js: { id: "mov7-leaflet-js", src: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js", integrity: "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" },
+  css: { id: "mov7-leaflet-css", href: "vendor/leaflet/leaflet.css", integrity: "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" },
+  js: { id: "mov7-leaflet-js", src: "vendor/leaflet/leaflet.js", integrity: "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" },
 };
 const EMOJI = { corrida: "🏃", caminhada: "🚶", ciclismo: "🚴", volei: "🏐", futebol: "⚽", funcional: "💪", trilhas: "⛰️", natacao: "🏊", outra: "🤸" };
 

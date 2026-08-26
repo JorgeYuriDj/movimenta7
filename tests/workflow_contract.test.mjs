@@ -66,6 +66,10 @@ test("scheduled caller delegates the permissions required by Pages", () => {
   }
 });
 
+test("artifact inclui a dependencia local do mapa", () => {
+  assert.match(ci, /cp -r css js data assets vendor _site\//);
+});
+
 test("Dependabot checks GitHub Actions weekly", () => {
   assert.match(dependabot, /package-ecosystem: github-actions/);
   assert.match(dependabot, /interval: weekly/);

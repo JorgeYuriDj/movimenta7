@@ -2,11 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
-const refresh = readFileSync(new URL("../.github/workflows/refresh.yml", import.meta.url), "utf8");
-const dependabot = readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8");
-const runbook = readFileSync(new URL("../moderacao/COMO_LIGAR_A_PLANILHA.md", import.meta.url), "utf8");
-const adr = readFileSync(new URL("../docs/adr/0007-feed-privado-e-atualizacao-automatica.md", import.meta.url), "utf8");
+function readText(relativePath) {
+  return readFileSync(new URL(relativePath, import.meta.url), "utf8").replace(/\r\n?/g, "\n");
+}
+
+const ci = readText("../.github/workflows/ci.yml");
+const refresh = readText("../.github/workflows/refresh.yml");
+const dependabot = readText("../.github/dependabot.yml");
+const runbook = readText("../moderacao/COMO_LIGAR_A_PLANILHA.md");
+const adr = readText("../docs/adr/0007-feed-privado-e-atualizacao-automatica.md");
 
 function between(source, start, end) {
   const from = source.indexOf(start);

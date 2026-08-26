@@ -72,7 +72,8 @@ coordenadas repetidas são preservadas.
 ## O que você faz quando precisar
 
 **Retirar:** marque `remover` na linha da resposta. A edição dispara a publicação, e o grupo sai
-normalmente em cerca de 1 a 2 minutos.
+normalmente em cerca de 1 a 2 minutos. **Não exclua a linha.** A caixa é o controle reversível:
+se foi marcada por engano, desmarque e o cadastro válido volta na próxima publicação.
 
 **Corrigir:** marque a linha antiga como `remover` e peça um novo cadastro. Não edite
 `moderacao/aprovados.json` ou `data/snapshot.json`: respostas externas não devem entrar no

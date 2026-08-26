@@ -55,7 +55,8 @@ Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorg
    O job `qa` não recebe segredo; `publish` declara `needs: qa`, usa o ambiente `github-pages`
    e só roda em `refs/heads/main`. Verificado de verdade na branch `prova/gate-vermelho`
    (run 32766185945): gate vermelho → publicação **skipped**, site anterior intacto no ar.
-   O que sobe é só o que a página carrega (`index.html`, `css/`, `js/`, `data/`, `assets/`) —
+   O que sobe é só o que a página carrega (`index.html`, `css/`, `js/`, `data/`, `assets/`,
+   `vendor/`) —
    `scripts/`, `tests/`, `docs/` e `moderacao/` deixaram de ser servidos.
 7. Idiomas: **código e prompts em inglês; tudo que o dono lê em português.** Pesquisa web em
    inglês, saída em português.
@@ -63,8 +64,10 @@ Plano mestre: `docs/plano/PLANO_EXECUCAO.md`. Decisões: `docs/adr/`. Dono: Jorg
 9. Encoding: `open(path, "w", encoding="utf-8")` em qualquer script Python; UTF-8 em tudo.
 10. **Cor e fonte têm gate.** Mexeu em token de cor em `css/style.css`? Atualize `PAIRS` em
     `scripts/valida_contraste.mjs:22-39` e rode — contraste é validado por FÓRMULA, nunca a olho
-    (D9). Fontes são **self-hosted** em `assets/fonts/` e não podem virar CDN: a CSP da página é
-    `default-src 'self'`. Método visual vem da pesquisa em `C:\dev\ifp-plataforma\docs\`
+    (D9). Fontes são **self-hosted** em `assets/fonts/` e o Leaflet auditado fica em
+    `vendor/leaflet/`; dependência executável não pode voltar a CDN. A CSP da página é
+    `default-src 'self'`. Arquivo coberto por SRI deve usar `-text` em `.gitattributes`, porque
+    normalização CRLF/LF altera o hash. Método visual vem da pesquisa em `C:\dev\ifp-plataforma\docs\`
     (`ESPECIALISTA_FRONTEND_UX.md`, `PLANO_UX.md`) — a aparência é nossa, o método é de lá.
 11. **Nenhuma chave de API no repositório** — ele é público. Isso descarta mapa 3D
     (Cesium/Google Photorealistic Tiles) e qualquer serviço que exija credencial no cliente.
